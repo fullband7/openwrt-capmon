@@ -1,0 +1,20 @@
+{
+	"luci-app-capmon": {
+		"description": "Grant access to Quota Manager",
+		"read": {
+			"ubus": {
+				"capmon": [ "get", "server_get", "export" ],
+				"luci-rpc": [ "getHostHints" ]
+			}
+		},
+		"write": {
+			"cgi-io": [ "upload" ],
+			"file": {
+				"/tmp/capmon-import.tar.gz": [ "write" ]
+			},
+			"ubus": {
+				"capmon": [ "reset", "sync", "server_set", "server_enable", "app_enable", "plan_set", "plan_del", "plan_reset", "import" ]
+			}
+		}
+	}
+}

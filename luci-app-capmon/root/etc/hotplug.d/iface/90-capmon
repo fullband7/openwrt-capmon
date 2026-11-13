@@ -1,0 +1,18 @@
+#!/bin/sh
+
+case "$ACTION" in
+	ifup|ifupdate) ;;
+	*) exit 0 ;;
+esac
+
+[ -x /usr/sbin/capmon ] || exit 0
+
+[ "$(uci -q get capmon.main.enabled)" = "0" ] && exit 0
+
+/usr/sbin/capmon refresh > /dev/null 2>&1
+
+if [ ! -f /var/run/capmon/restored ] && [ -n "$(uci -q get capmon.main.server_url)" ]; then
+	/usr/sbin/capmon retry > /dev/null 2>&1 &
+fi
+
+exit 0

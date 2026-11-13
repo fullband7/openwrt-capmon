@@ -1,0 +1,69 @@
+{#
+	Capmon Quota Manager
+	Copyright 2026 fullband7 (https://github.com/fullband7)
+	Licensed under the Apache License, Version 2.0
+	SPDX-License-Identifier: Apache-2.0
+#}
+
+{% include('header') %}
+
+{%
+	const labels = {
+		help: _('Give a client a data plan. When the allowance is used up, its internet access is cut until the plan is reset or renewed. Access to the local network is not affected.'),
+		add: _('Add data plan'),
+		add_title: _('Add data plan'),
+		edit_title: _('Edit data plan'),
+		plans: _('Active plans'),
+		blocked: _('Blocked'),
+		usage: _('Plan usage'),
+		device: _('Device'),
+		used_of: _('%s of %s used'),
+		left: _('%s left'),
+		dec: _('Decrease'),
+		inc: _('Increase'),
+		select_device: _('Select a device…'),
+		custom_mac: _('Enter a MAC address manually…'),
+		label: _('Label (optional)'),
+		label_ph: _('For example: Guest phone'),
+		allowance: _('Allowance'),
+		resets: _('Renews'),
+		r_none: _('Never (reset manually)'),
+		r_daily: _('Every day'),
+		r_weekly: _('Every week'),
+		r_monthly: _('Every month'),
+		enabled: _('Plan enabled'),
+		edit: _('Edit'),
+		delete: _('Delete'),
+		enable: _('Enable'),
+		disable: _('Disable'),
+		reset_usage: _('Reset usage'),
+		st_ok: _('Active'),
+		st_blocked: _('Blocked'),
+		st_off: _('Disabled'),
+		unknown: _('Unknown device'),
+		empty: _('No data plans yet. Add one to limit how much internet a client can use.'),
+		del_title: _('Delete this plan?'),
+		del_text: _('The client will no longer have a limit and internet access is restored.'),
+		rs_title: _('Reset usage?'),
+		rs_text: _('The used data of this plan is set back to zero and internet access is restored if it was blocked.'),
+		err: _('Unable to load data plans.'),
+		err_save: _('The plan could not be saved.'),
+		err_mac: _('Choose a device or enter a valid MAC address.'),
+		err_limit: _('Enter an allowance greater than zero.'),
+		awaiting: _('Waiting for the data server. The usage shown here may be incomplete until your saved data has been restored.'),
+		inactive: _('The accounting service is not running. Enable it under System → Startup.'),
+		disabled: _('Quota is Disabled. Turn it on from the App Settings page.'),
+		noacct: _('Connection accounting is turned off in the kernel, so traffic cannot be counted. Restart the Quota Manager service to turn it on.')
+	};
+%}
+
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261108150000">
+
+<h2 name="content">{{ entityencode(_('Quota ACL')) }}</h2>
+
+{% include('capmon/root', { labels }) %}
+
+<script src="{{ resource }}/capmon/common.js?v=20261108150000"></script>
+<script src="{{ resource }}/capmon/acl.js?v=20261108150000"></script>
+
+{% include('footer') %}

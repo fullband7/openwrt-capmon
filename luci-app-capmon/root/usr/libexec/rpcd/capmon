@@ -1,0 +1,168 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+
+fail() {
+	printf '{"error":"%s"}\n' "$1"
+	exit 0
+}
+
+ok() {
+	printf '{"result":true}\n'
+	exit 0
+}
+
+map_rc() {
+	case "$1" in
+		0) ok ;;
+		3) fail not_configured ;;
+		5) fail auth ;;
+		6) fail offline ;;
+		7) fail server ;;
+		8) fail bad_data ;;
+		9) fail not_synced ;;
+		10) fail too_many ;;
+		12) fail app_disabled ;;
+		13) fail tls ;;
+		14) fail insecure ;;
+		15) fail bad_backup ;;
+		*) fail failed ;;
+	esac
+}
+
+valid_mac() {
+	[ "${#1}" -eq 17 ] || return 1
+	case "$1" in
+		[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) return 0 ;;
+	esac
+	return 1
+}
+
+read_input() {
+	local raw
+	raw=$(head -c 4096)
+	[ -n "$raw" ] || fail "empty request"
+	json_init
+	json_load "$raw" 2> /dev/null || fail "invalid json"
+}
+
+get_mac() {
+	json_get_var MAC mac
+	MAC=$(printf '%s' "$MAC" | tr 'A-F' 'a-f')
+	valid_mac "$MAC" || fail "invalid mac address"
+}
+
+plan_set() {
+	local name limit period enabled rc
+	read_input
+	get_mac
+	json_get_var name name
+	json_get_var limit limit
+	json_get_var period period
+	json_get_var enabled enabled
+	case "$enabled" in
+		0|false) enabled=0 ;;
+		*) enabled=1 ;;
+	esac
+	/usr/sbin/capmon plan-set "$MAC" "$name" "$limit" "$period" "$enabled" > /dev/null 2>&1
+	rc=$?
+	[ "$rc" = 1 ] && fail "invalid input"
+	map_rc "$rc"
+}
+
+plan_del() {
+	read_input
+	get_mac
+	/usr/sbin/capmon plan-del "$MAC" > /dev/null 2>&1
+	map_rc "$?"
+}
+
+plan_reset() {
+	read_input
+	get_mac
+	/usr/sbin/capmon qreset "$MAC" > /dev/null 2>&1
+	map_rc "$?"
+}
+
+server_set() {
+	local url token rid pin rc
+	read_input
+	json_get_var url url
+	json_get_var token token
+	json_get_var rid router_id
+	json_get_var pin pin
+	CAPMON_TOKEN="$token" /usr/sbin/capmon server-set "$url" "$rid" "$pin" > /dev/null 2>&1
+	rc=$?
+	[ "$rc" = 1 ] && fail "invalid input"
+	map_rc "$rc"
+}
+
+server_enable() {
+	local enabled
+	read_input
+	json_get_var enabled enabled
+	case "$enabled" in
+		0|1) ;;
+		*) fail "invalid input" ;;
+	esac
+	/usr/sbin/capmon server-enable "$enabled" > /dev/null 2>&1
+	map_rc "$?"
+}
+
+app_enable() {
+	local enabled
+	read_input
+	json_get_var enabled enabled
+	case "$enabled" in
+		0|1) ;;
+		*) fail "invalid input" ;;
+	esac
+	/usr/sbin/capmon app-enable "$enabled" > /dev/null 2>&1 < /dev/null
+	map_rc "$?"
+}
+
+case "$1" in
+	list)
+		printf '{"get":{},"reset":{},"sync":{},"server_get":{},"server_set":{"url":"","token":"","router_id":"","pin":""},"server_enable":{"enabled":""},"app_enable":{"enabled":""},"plan_set":{"mac":"","name":"","limit":"","period":"","enabled":""},"plan_del":{"mac":""},"plan_reset":{"mac":""},"export":{},"import":{}}\n'
+		;;
+	call)
+		case "$2" in
+			get)
+				cat > /dev/null
+				exec /usr/sbin/capmon json
+				;;
+			server_get)
+				cat > /dev/null
+				exec /usr/sbin/capmon server-get
+				;;
+			reset)
+				cat > /dev/null
+				/usr/sbin/capmon reset > /dev/null 2>&1
+				map_rc "$?"
+				;;
+			sync)
+				cat > /dev/null
+				/usr/sbin/capmon syncnow > /dev/null 2>&1
+				map_rc "$?"
+				;;
+			export)
+				cat > /dev/null
+				exec /usr/sbin/capmon export-json
+				;;
+			import)
+				cat > /dev/null
+				/usr/sbin/capmon import > /dev/null 2>&1 < /dev/null
+				map_rc "$?"
+				;;
+			server_set) server_set ;;
+			server_enable) server_enable ;;
+			app_enable) app_enable ;;
+			plan_set) plan_set ;;
+			plan_del) plan_del ;;
+			plan_reset) plan_reset ;;
+			*) fail "unknown method" ;;
+		esac
+		;;
+esac
+
+exit 0

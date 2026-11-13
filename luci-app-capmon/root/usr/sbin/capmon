@@ -1,0 +1,1235 @@
+#!/bin/sh
+
+umask 077
+
+RUN=/var/run/capmon
+LOCK=/var/run/capmon.lock
+NETLOCK=/var/run/capmon.net.lock
+TOKEN_DIR=/etc/capmon
+TOKEN_FILE=/etc/capmon/token
+LIBX=/usr/libexec/capmon
+LEASES=/tmp/dhcp.leases
+CRON=/etc/crontabs/root
+CRON_CMD="/usr/sbin/capmon cron"
+IMPORT=/tmp/capmon-import.tar.gz
+IMPORT_MAX=1048576
+IMPORT_TAR_MAX=1060864
+IMPORT_NAME=capmon-backup.cmbak
+ACCT=/proc/sys/net/netfilter/nf_conntrack_acct
+HEADER_V1="type,key,name,ip,up,dn,tup,tdn,seen,limit,period,enabled,used,pkey,since,day"
+HEADER_V2="$HEADER_V1,yup,ydn"
+HEADER_V3="$HEADER_V2,mup,mdn,lup,ldn"
+HEADER="$HEADER_V3,wup,wdn,pup,pdn"
+MAX_PLANS=128
+DEVS=""
+SINCE=""
+DAY=""
+LIBS=0
+SRV_URL=""
+SRV_TOKEN=""
+SRV_PIN=""
+SRV_ID=""
+SRV_CODE=""
+SRV_RC=0
+SRV_MAXTIME=10
+PUSH_FAST=30
+PUSH_SLOW=300
+
+[ -d "$RUN" ] || { mkdir -p "$RUN" && chmod 700 "$RUN"; }
+
+need_libs() {
+	[ "$LIBS" = "1" ] && return 0
+	. /lib/functions.sh
+	. /lib/functions/network.sh
+	LIBS=1
+}
+
+valid_mac() {
+	[ "${#1}" -eq 17 ] || return 1
+	case "$1" in
+		[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) return 0 ;;
+	esac
+	return 1
+}
+
+insecure_ok() {
+	[ "$(uci -q get capmon.main.allow_insecure)" = "1" ]
+}
+
+url_blocked() {
+	local u
+	u=$(uci -q get capmon.main.server_url)
+	case "$u" in
+		http://*)
+			insecure_ok && return 1
+			return 0
+			;;
+	esac
+	return 1
+}
+
+valid_url() {
+	local h
+	case "$1" in
+		https://*) h="${1#https://}" ;;
+		http://*)
+			insecure_ok || return 1
+			h="${1#http://}"
+			;;
+		*) return 1 ;;
+	esac
+	case "$h" in
+		""|*[!A-Za-z0-9.:_-]*) return 1 ;;
+	esac
+	[ "${#1}" -le 120 ]
+}
+
+valid_limit() {
+	case "$1" in
+		""|0|*[!0-9]*) return 1 ;;
+	esac
+	[ "${#1}" -le 15 ]
+}
+
+valid_token() {
+	case "$1" in
+		""|*[!A-Za-z0-9._-]*) return 1 ;;
+	esac
+	[ "${#1}" -ge 16 ] && [ "${#1}" -le 128 ]
+}
+
+valid_pin() {
+	local p
+	case "$1" in
+		sha256//*) p="${1#sha256//}" ;;
+		*) return 1 ;;
+	esac
+	case "$p" in
+		""|*[!A-Za-z0-9+/=]*|*=*=*) return 1 ;;
+	esac
+	[ "${#p}" -eq 44 ] && [ "${p%=}" != "$p" ]
+}
+
+read_token() {
+	local t=""
+	[ -r "$TOKEN_FILE" ] && read -r t < "$TOKEN_FILE"
+	printf '%s' "$t"
+}
+
+write_token() {
+	mkdir -p "$TOKEN_DIR" && chmod 700 "$TOKEN_DIR"
+	printf '%s\n' "$1" > "$TOKEN_FILE.new" && mv "$TOKEN_FILE.new" "$TOKEN_FILE"
+}
+
+migrate_token() {
+	local t
+	t=$(uci -q get capmon.main.token) || return 0
+	[ -s "$TOKEN_FILE" ] || [ -z "$t" ] || write_token "$t"
+	uci -q delete capmon.main.token
+	commit_config
+}
+
+valid_id() {
+	case "$1" in
+		""|*[!A-Za-z0-9_-]*) return 1 ;;
+	esac
+	[ "${#1}" -le 32 ]
+}
+
+add_dev() {
+	case "$1" in
+		""|*[!A-Za-z0-9._-]*) return 0 ;;
+	esac
+	[ "${#1}" -le 15 ] || return 0
+	case " $DEVS " in
+		*" $1 "*) return 0 ;;
+	esac
+	DEVS="$DEVS $1"
+}
+
+zone_cb() {
+	local sec="$1" masq zname nets devs n d
+	config_get_bool masq "$sec" masq 0
+	config_get zname "$sec" name
+	case "$zname" in
+		wan|wan6) masq=1 ;;
+	esac
+	[ "$masq" = "1" ] || return 0
+	config_get nets "$sec" network
+	config_get devs "$sec" device
+	[ -n "$nets$devs" ] || nets="$zname"
+	for n in $nets; do
+		d=""
+		network_get_device d "$n"
+		add_dev "$d"
+	done
+	for d in $devs; do
+		add_dev "$d"
+	done
+}
+
+net_cb() {
+	local d
+	case "$1" in
+		wan|wan6|wan_*) ;;
+		*) return 0 ;;
+	esac
+	network_get_device d "$1"
+	add_dev "$d"
+}
+
+wan_devices() {
+	local extra d
+	need_libs
+	DEVS=""
+	config_load capmon
+	config_get extra main extra_dev
+	for d in $extra; do
+		add_dev "$d"
+	done
+	network_flush_cache
+	config_load firewall
+	config_foreach zone_cb zone
+	config_load network
+	config_foreach net_cb interface
+}
+
+load_rules() {
+	rm -f "$RUN/block.nft"
+	nft -f - <<EOF
+table inet capmon
+delete table inet capmon
+table inet capmon {
+	set wanif {
+		type ifname
+	}
+	set blkmac {
+		type ether_addr
+	}
+	set blk4 {
+		type ipv4_addr
+	}
+	set blk6 {
+		type ipv6_addr
+	}
+	chain forward {
+		type filter hook forward priority 10; policy accept;
+		oifname @wanif ether saddr @blkmac drop
+		meta nfproto ipv4 oifname @wanif ip saddr @blk4 drop
+		meta nfproto ipv6 oifname @wanif ip6 saddr @blk6 drop
+		meta nfproto ipv4 iifname @wanif ip daddr @blk4 drop
+		meta nfproto ipv6 iifname @wanif ip6 daddr @blk6 drop
+	}
+}
+EOF
+}
+
+table_up() {
+	nft list table inet capmon > /dev/null 2>&1
+}
+
+router_ident() {
+	local n dev m
+	n=$(uci -q get 'system.@system[0].hostname' | tr -cd 'A-Za-z0-9._-' | cut -c1-32)
+	[ -n "$n" ] || n=router
+	need_libs
+	network_get_device dev lan
+	[ -n "$dev" ] || dev=br-lan
+	dev=$(printf '%s' "$dev" | tr -cd 'A-Za-z0-9._-')
+	m=""
+	[ -n "$dev" ] && [ -r "/sys/class/net/$dev/address" ] && m=$(tr 'A-F' 'a-f' < "/sys/class/net/$dev/address")
+	valid_mac "$m" || m=""
+	printf '%s\n%s\n' "$n" "$m" > "$RUN/rid"
+}
+
+offload_mark() {
+	local s=""
+	if [ "$(uci -q get 'firewall.@defaults[0].flow_offloading')" = "1" ]; then
+		s=sw
+		[ "$(uci -q get 'firewall.@defaults[0].flow_offloading_hw')" = "1" ] && s=hw
+	fi
+	if [ -n "$s" ]; then
+		echo "$s" > "$RUN/offload"
+	else
+		rm -f "$RUN/offload"
+	fi
+}
+
+do_refresh() {
+	local els="" d
+	offload_mark
+	nft list set inet capmon wanif > /dev/null 2>&1 || return 0
+	wan_devices
+	: > "$RUN/wan.new"
+	for d in $DEVS; do
+		els="$els${els:+, }\"$d\""
+		printf '%s\n' "$d" >> "$RUN/wan.new"
+	done
+	mv "$RUN/wan.new" "$RUN/wan"
+	router_ident
+	if [ -n "$els" ]; then
+		printf 'flush set inet capmon wanif\nadd element inet capmon wanif { %s }\n' "$els" | nft -f -
+	else
+		nft flush set inet capmon wanif
+	fi
+}
+
+apply_block() {
+	local a
+	table_up || return 0
+	if ! cmp -s "$RUN/block.new" "$RUN/block.nft" 2> /dev/null; then
+		nft -f "$RUN/block.new" > /dev/null 2>&1 && mv "$RUN/block.new" "$RUN/block.nft"
+	fi
+	rm -f "$RUN/block.new"
+	[ -s "$RUN/kill.list" ] || return 0
+	command -v conntrack > /dev/null 2>&1 || return 0
+	while read -r a; do
+		case "$a" in
+			*:*)
+				conntrack -D -f ipv6 -s "$a" > /dev/null 2>&1 < /dev/null
+				conntrack -D -f ipv6 -r "$a" > /dev/null 2>&1 < /dev/null
+				;;
+			*.*)
+				conntrack -D -s "$a" > /dev/null 2>&1 < /dev/null
+				conntrack -D -r "$a" > /dev/null 2>&1 < /dev/null
+				;;
+		esac
+	done < "$RUN/kill.list"
+}
+
+write_meta() {
+	printf '%s\n%s\n' "$SINCE" "$DAY" > "$RUN/meta.new" && mv "$RUN/meta.new" "$RUN/meta"
+}
+
+prev_day() {
+	awk -v d="$1" 'BEGIN {
+		if (d !~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/) {
+			print "0"
+			exit
+		}
+		y = substr(d, 1, 4) + 0
+		m = substr(d, 5, 2) + 0
+		n = substr(d, 7, 2) - 1
+		if (n < 1) {
+			if (--m < 1) {
+				m = 12
+				y--
+			}
+			n = substr("312831303130313130313031", 2 * m - 1, 2) + 0
+			if (m == 2 && y % 4 == 0 && (y % 100 != 0 || y % 400 == 0))
+				n = 29
+		}
+		printf "%04d%02d%02d\n", y, m, n
+	}'
+}
+
+prev_month() {
+	awk -v d="$1" 'BEGIN {
+		d = substr(d, 1, 6)
+		if (length(d) != 6 || d !~ /^[0-9]+$/) {
+			print "0"
+			exit
+		}
+		y = substr(d, 1, 4) + 0
+		m = substr(d, 5, 2) - 1
+		if (m < 1) {
+			m = 12
+			y--
+		}
+		printf "%04d%02d\n", y, m
+	}'
+}
+
+read_meta() {
+	local fresh=0
+	SINCE=""
+	DAY=""
+	[ -f "$RUN/meta" ] && { read -r SINCE; read -r DAY; } < "$RUN/meta"
+	case "$SINCE" in
+		""|*[!0-9]*) SINCE=$(date +%s); fresh=1 ;;
+	esac
+	case "$DAY" in
+		""|*[!0-9]*) DAY=$(date +%Y%m%d); fresh=1 ;;
+	esac
+	[ "$fresh" = "0" ] || write_meta
+}
+
+plan_sec() {
+	printf 'plan_%s' "$(printf '%s' "$1" | tr -d ':')"
+}
+
+plan_cb() {
+	local sec="$1" mac name limit period enabled
+	config_get mac "$sec" mac
+	config_get name "$sec" name
+	config_get limit "$sec" limit
+	config_get period "$sec" period
+	config_get enabled "$sec" enabled
+	valid_mac "$mac" || return 0
+	valid_limit "$limit" || return 0
+	case "$period" in
+		daily|weekly|monthly) ;;
+		*) period=none ;;
+	esac
+	[ "$enabled" = "0" ] || enabled=1
+	name=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-32)
+	printf '%s\t%s\t%s\t%s\t%s\n' "$mac" "$name" "$limit" "$period" "$enabled" >> "$RUN/plans.new"
+}
+
+load_plans() {
+	need_libs
+	: > "$RUN/plans.new"
+	config_load capmon
+	config_foreach plan_cb plan
+	mv "$RUN/plans.new" "$RUN/plans"
+}
+
+commit_config() {
+	if ! uci -q commit capmon; then
+		uci -q revert capmon
+		return 1
+	fi
+	chmod 0600 /etc/config/capmon 2> /dev/null
+}
+
+save_plans() {
+	commit_config && load_plans
+}
+
+server_off() {
+	[ "$(uci -q get capmon.main.server_enabled)" != "1" ]
+}
+
+app_off() {
+	[ "$(uci -q get capmon.main.enabled)" = "0" ]
+}
+
+locked() {
+	local rc
+	lock "$LOCK"
+	"$@"
+	rc=$?
+	lock -u "$LOCK"
+	return "$rc"
+}
+
+sync_force() {
+	table_up && do_sync force
+	return 0
+}
+
+sync_init() {
+	init_state
+	sync_force
+}
+
+refresh_all() {
+	do_refresh
+	load_plans
+}
+
+init_state() {
+	local f
+	for f in stats quota; do
+		[ -f "$RUN/$f" ] || : > "$RUN/$f"
+	done
+	[ -f "$RUN/plans" ] || load_plans
+	read_meta
+}
+
+ct_dump() {
+	conntrack -L -f ipv4 -o extended -z 2> /dev/null
+	conntrack -L -f ipv6 -o extended -z 2> /dev/null
+}
+
+do_sync() {
+	local now last=0 today yday="" pmon="" max=3 rname=router rmac="" crt=1 bl=0 f
+	now=$(date +%s)
+	[ -f "$RUN/last" ] && read -r last < "$RUN/last"
+	case "$last" in
+		""|*[!0-9]*) last=0 ;;
+	esac
+	case "$1" in
+		force) max=0 ;;
+		stale) max=12 ;;
+	esac
+	if [ "$max" -gt 0 ] && [ $((now - last)) -ge 0 ] && [ $((now - last)) -lt "$max" ]; then
+		return 0
+	fi
+	read_meta
+	today=$(date +%Y%m%d)
+	if [ "$DAY" != "$today" ]; then
+		yday=$(prev_day "$today")
+		pmon=$(prev_month "$today")
+	fi
+	for f in stats plans quota blocked wan; do
+		[ -f "$RUN/$f" ] || : > "$RUN/$f"
+	done
+	[ -f "$RUN/rid" ] || router_ident
+	{ read -r rname; read -r rmac; } < "$RUN/rid"
+	[ "$(uci -q get capmon.main.count_router)" = "0" ] && crt=0
+	[ -f "$RUN/baseline" ] && bl=1
+	{
+		echo "@@ARP"
+		cat /proc/net/arp
+		echo "@@NB6"
+		ip -6 neigh show 2> /dev/null
+		echo "@@LEASE"
+		cat "$LEASES" 2> /dev/null
+		echo "@@WAN"
+		cat "$RUN/wan"
+		echo "@@ADDR"
+		ip -o addr show 2> /dev/null
+		echo "@@CT"
+		ct_dump
+	} | awk -v run="$RUN" -v today="$today" -v sday="$DAY" -v yday="$yday" -v pmon="$pmon" -v now="$now" -v kd="$today" -v kw="$(date +%G%V)" -v km="$(date +%Y%m)" -v rname="$rname" -v rmac="$rmac" -v crouter="$crt" -v baseline="$bl" -f "$LIBX/lib.awk" -f "$LIBX/sync.awk" || return 1
+	apply_block
+	mv "$RUN/stats.new" "$RUN/stats"
+	mv "$RUN/quota.new" "$RUN/quota"
+	mv "$RUN/blocked.new" "$RUN/blocked"
+	rm -f "$RUN/baseline" "$RUN/kill.list"
+	if [ "$DAY" != "$today" ]; then
+		DAY="$today"
+		write_meta
+	fi
+	echo "$now" > "$RUN/last"
+}
+
+load_server() {
+	local u t i p
+	server_off && return 1
+	u=$(uci -q get capmon.main.server_url)
+	t=$(read_token)
+	i=$(uci -q get capmon.main.router_id)
+	p=$(uci -q get capmon.main.server_pin)
+	u="${u%/}"
+	valid_url "$u" || return 1
+	valid_token "$t" || return 1
+	[ -z "$p" ] || valid_pin "$p" || return 1
+	[ -n "$i" ] || i=$(uci -q get 'system.@system[0].hostname')
+	i=$(printf '%s' "$i" | tr -cd 'A-Za-z0-9_-' | cut -c1-32)
+	[ -n "$i" ] || i=router
+	SRV_URL="$u"
+	SRV_TOKEN="$t"
+	SRV_ID="$i"
+	SRV_PIN=""
+	case "$u" in
+		https://*) SRV_PIN="$p" ;;
+	esac
+	return 0
+}
+
+is_restored() {
+	[ -f "$RUN/restored" ]
+}
+
+need_restore() {
+	load_server && ! is_restored
+}
+
+srv_http() {
+	local method="$1" path="$2" body="$3" out="$4" code="" hdr="$RUN/hdr.$$" proto=https
+	SRV_CODE=000
+	SRV_RC=0
+	: > "$out"
+	if ! command -v curl > /dev/null 2>&1; then
+		SRV_RC=127
+		return 0
+	fi
+	case "$SRV_URL" in
+		http://*) proto=http ;;
+	esac
+	printf 'X-Auth-Token: %s\n' "$SRV_TOKEN" > "$hdr"
+	set -- -sS -o "$out" -w '%{http_code}' --connect-timeout 3 --max-time "$SRV_MAXTIME" --max-filesize 4194304 --noproxy '*' --proto "=$proto" -H "@$hdr"
+	[ "$proto" = "https" ] && set -- "$@" --tlsv1.2
+	[ -z "$SRV_PIN" ] || set -- "$@" -k --pinnedpubkey "$SRV_PIN"
+	[ "$method" != "POST" ] || set -- "$@" -H 'Content-Type: text/csv' --data-binary "@$body"
+	code=$(curl -q "$@" --url "$SRV_URL$path" 2> /dev/null)
+	SRV_RC=$?
+	rm -f "$hdr"
+	SRV_CODE="${code:-000}"
+}
+
+mark_error() {
+	date +%s > "$RUN/sync_try"
+	case "$SRV_RC" in
+		4|51|58|59|60|77|83|90|91)
+			echo tls > "$RUN/sync_err"
+			return 13
+			;;
+	esac
+	case "$SRV_CODE" in
+		401|403|429) echo auth > "$RUN/sync_err"; return 5 ;;
+		000) echo offline > "$RUN/sync_err"; return 6 ;;
+		*) echo server > "$RUN/sync_err"; return 7 ;;
+	esac
+}
+
+mark_ok() {
+	date +%s | tee "$RUN/sync_try" > "$RUN/sync_ok"
+	rm -f "$RUN/sync_err"
+}
+
+build_payload() {
+	awk -v header="$HEADER" -v id="$SRV_ID" -v since="$SINCE" -v day="$DAY" -v pf="$RUN/plans" -v qf="$RUN/quota" -f "$LIBX/payload.awk" "$RUN/plans" "$RUN/quota" "$RUN/stats"
+}
+
+prepare_push() {
+	read_meta
+	build_payload > "$RUN/push.csv" || { rm -f "$RUN/push.csv"; return 1; }
+	awk -F '\t' -v OFS='\t' '{ print $1, $5, $6, $7, $8, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19 }' "$RUN/stats" > "$RUN/pushed.stats.new" && cp "$RUN/quota" "$RUN/pushed.quota.new"
+}
+
+push_commit() {
+	[ -f "$RUN/pushed.stats.new" ] && [ -f "$RUN/pushed.quota.new" ] || return 0
+	mv "$RUN/pushed.stats.new" "$RUN/pushed.stats"
+	mv "$RUN/pushed.quota.new" "$RUN/pushed.quota"
+}
+
+do_push() {
+	local rc=0
+	load_server || return 3
+	is_restored || return 4
+	locked prepare_push || return 8
+	srv_http POST "/api/sync?id=$SRV_ID" "$RUN/push.csv" "$RUN/resp"
+	if [ "$SRV_CODE" = "200" ]; then
+		locked push_commit
+		mark_ok
+	else
+		rm -f "$RUN/pushed.stats.new" "$RUN/pushed.quota.new"
+		mark_error
+		rc=$?
+	fi
+	rm -f "$RUN/push.csv" "$RUN/resp"
+	return "$rc"
+}
+
+finish_restore() {
+	: > "$RUN/restored"
+	mark_ok
+	read_meta
+	sync_force
+}
+
+restore_empty() {
+	rm -f "$RUN/pushed.stats" "$RUN/pushed.quota"
+	finish_restore
+}
+
+apply_restore() {
+	local sig="$1" hdr
+	is_restored && return 0
+	load_server && [ "$SRV_URL $SRV_ID" = "$sig" ] || return 8
+	hdr=$(head -n 1 "$RUN/pull.csv" | tr -d '\r')
+	if [ "$hdr" != "$HEADER" ] && [ "$hdr" != "$HEADER_V3" ] && [ "$hdr" != "$HEADER_V2" ] && [ "$hdr" != "$HEADER_V1" ]; then
+		echo server > "$RUN/sync_err"
+		date +%s > "$RUN/sync_try"
+		return 8
+	fi
+	do_sync force
+	if ! awk -v run="$RUN" -v yday="$(prev_day "$DAY")" -v pmon="$(prev_month "$DAY")" -f "$LIBX/lib.awk" -f "$LIBX/merge.awk" "$RUN/pull.csv"; then
+		echo server > "$RUN/sync_err"
+		return 8
+	fi
+	mv "$RUN/stats.merge" "$RUN/stats"
+	mv "$RUN/quota.merge" "$RUN/quota"
+	mv "$RUN/meta.merge" "$RUN/meta"
+	mv "$RUN/pushed.stats.merge" "$RUN/pushed.stats"
+	mv "$RUN/pushed.quota.merge" "$RUN/pushed.quota"
+	finish_restore
+}
+
+do_restore() {
+	local sig rc=0
+	load_server || return 3
+	is_restored && return 0
+	sig="$SRV_URL $SRV_ID"
+	srv_http GET "/api/data?id=$SRV_ID" "" "$RUN/pull.csv"
+	case "$SRV_CODE" in
+		200)
+			locked apply_restore "$sig"
+			rc=$?
+			;;
+		204|404)
+			locked restore_empty
+			;;
+		*)
+			mark_error
+			rc=$?
+			;;
+	esac
+	rm -f "$RUN/pull.csv"
+	return "$rc"
+}
+
+rebuild() {
+	load_rules
+	do_refresh
+	do_sync force
+}
+
+reload_all() {
+	init_state
+	load_plans
+	rebuild
+}
+
+push_async() {
+	/usr/sbin/capmon push > /dev/null 2>&1 &
+}
+
+cron_add() {
+	mkdir -p /etc/crontabs
+	grep -qF "$CRON_CMD" "$CRON" 2> /dev/null && return 0
+	if [ -s "$CRON" ] && [ -n "$(tail -c1 "$CRON")" ]; then
+		echo >> "$CRON"
+	fi
+	printf '*/5 * * * * %s\n' "$CRON_CMD" >> "$CRON"
+}
+
+cron_del() {
+	[ -f "$CRON" ] || return 0
+	grep -qF "$CRON_CMD" "$CRON" 2> /dev/null || return 0
+	grep -vF "$CRON_CMD" "$CRON" > "$RUN/cron.tmp"
+	cat "$RUN/cron.tmp" > "$CRON"
+	rm -f "$RUN/cron.tmp"
+}
+
+acct_on() {
+	local up rest
+	[ -w "$ACCT" ] || return 0
+	if [ ! -f "$RUN/last" ] && [ "$(cat "$ACCT" 2> /dev/null)" = "1" ]; then
+		read -r up rest < /proc/uptime
+		up="${up%%.*}"
+		case "$up" in
+			""|*[!0-9]*) up=0 ;;
+		esac
+		[ "$up" -gt 300 ] && : > "$RUN/baseline"
+	fi
+	echo 1 > "$ACCT"
+}
+
+start_locked() {
+	rm -f "$IMPORT" "$RUN/import.in"
+	rm -rf "$RUN/import.tgz"
+	acct_on
+	migrate_token
+	reload_all
+}
+
+cmd_start() {
+	app_off && return 0
+	locked start_locked
+	cron_add
+	/etc/init.d/cron enabled || /etc/init.d/cron enable
+	pidof crond > /dev/null 2>&1 || /etc/init.d/cron start
+	if need_restore; then
+		/usr/sbin/capmon retry > /dev/null 2>&1 &
+	fi
+}
+
+stop_locked() {
+	nft delete table inet capmon 2> /dev/null
+	rm -f "$RUN/last" "$RUN/block.nft"
+}
+
+cmd_stop() {
+	locked sync_init
+	if load_server && is_restored && lock -n "$NETLOCK"; then
+		SRV_MAXTIME=4
+		do_push
+		lock -u "$NETLOCK"
+	fi
+	locked stop_locked
+}
+
+push_gap() {
+	local err=""
+	[ -f "$RUN/sync_err" ] && read -r err < "$RUN/sync_err"
+	case "$err" in
+		auth|tls) echo "$PUSH_SLOW" ;;
+		*) echo "$PUSH_FAST" ;;
+	esac
+}
+
+cmd_daemon() {
+	local iv now next=0
+	while :; do
+		iv=$(uci -q get capmon.main.interval)
+		case "$iv" in
+			""|*[!0-9]*) iv=10 ;;
+		esac
+		[ "$iv" -ge 5 ] && [ "$iv" -le 60 ] || iv=10
+		if table_up; then
+			locked sync_init
+			now=$(date +%s)
+			if [ "$now" -ge "$next" ] && load_server; then
+				next=$((now + $(push_gap)))
+				/usr/sbin/capmon auto > /dev/null 2>&1 &
+			fi
+		fi
+		sleep "$iv"
+	done
+}
+
+cmd_auto() {
+	app_off && return 0
+	lock -n "$NETLOCK" || return 0
+	locked init_state
+	do_restore && do_push
+	lock -u "$NETLOCK"
+	return 0
+}
+
+cmd_cron() {
+	app_off && return 0
+	table_up || return 0
+	offload_mark
+	locked sync_init
+	load_server || return 0
+	lock -n "$NETLOCK" || return 0
+	do_restore && do_push
+	lock -u "$NETLOCK"
+	return 0
+}
+
+cmd_retry() {
+	local i=0 rc pid=""
+	app_off && return 0
+	[ -f "$RUN/retry.pid" ] && read -r pid < "$RUN/retry.pid"
+	if [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
+		return 0
+	fi
+	echo $$ > "$RUN/retry.pid"
+	while [ "$i" -lt 40 ]; do
+		rc=0
+		if load_server; then
+			locked init_state
+			lock "$NETLOCK"
+			do_restore
+			rc=$?
+			[ "$rc" != 0 ] || do_push
+			lock -u "$NETLOCK"
+		fi
+		case "$rc" in
+			0|3|5|13|14) break ;;
+		esac
+		sleep 15
+		i=$((i + 1))
+	done
+	rm -f "$RUN/retry.pid"
+}
+
+cmd_push() {
+	app_off && return 0
+	locked init_state
+	lock "$NETLOCK"
+	do_push
+	lock -u "$NETLOCK"
+	return 0
+}
+
+cmd_syncnow() {
+	local rc=0
+	app_off && return 12
+	locked sync_init
+	if load_server; then
+		lock "$NETLOCK"
+		do_restore
+		rc=$?
+		if [ "$rc" = 0 ]; then
+			do_push
+			rc=$?
+		fi
+		lock -u "$NETLOCK"
+	else
+		rc=3
+		url_blocked && rc=14
+	fi
+	return "$rc"
+}
+
+cmd_bind() {
+	mkdir "$RUN/bind.pending" 2> /dev/null || return 0
+	sleep 2
+	rmdir "$RUN/bind.pending" 2> /dev/null
+	app_off && return 0
+	locked sync_force
+}
+
+cmd_reset() {
+	local keep=0
+	app_off && return 12
+	lock "$LOCK"
+	init_state
+	if need_restore; then
+		lock -u "$LOCK"
+		return 9
+	fi
+	is_restored && keep=1
+	rm -rf "$RUN"
+	mkdir -p "$RUN" && chmod 700 "$RUN"
+	[ "$keep" = "0" ] || : > "$RUN/restored"
+	: > "$RUN/baseline"
+	init_state
+	if table_up; then
+		do_refresh
+		do_sync force
+	fi
+	lock -u "$LOCK"
+	push_async
+	return 0
+}
+
+cmd_qreset() {
+	local mac="$1"
+	valid_mac "$mac" || return 1
+	app_off && return 12
+	lock "$LOCK"
+	init_state
+	if need_restore; then
+		lock -u "$LOCK"
+		return 9
+	fi
+	do_sync force
+	awk -F '\t' -v m="$mac" 'BEGIN { OFS = "\t" } $1 == m { $2 = 0 } { print }' "$RUN/quota" > "$RUN/quota.tmp" && mv "$RUN/quota.tmp" "$RUN/quota"
+	table_up && do_sync force
+	lock -u "$LOCK"
+	push_async
+	return 0
+}
+
+cmd_plan_set() {
+	local mac="$1" name="$2" limit="$3" period="$4" enabled="$5" n sec
+	valid_mac "$mac" || return 1
+	valid_limit "$limit" || return 1
+	case "$period" in
+		none|daily|weekly|monthly) ;;
+		*) return 1 ;;
+	esac
+	case "$enabled" in
+		0|1) ;;
+		*) return 1 ;;
+	esac
+	name=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-32)
+	lock "$LOCK"
+	init_state
+	n=$(awk -F '\t' -v m="$mac" '$1 != m { c++ } END { print c + 0 }' "$RUN/plans")
+	if [ "$n" -ge "$MAX_PLANS" ]; then
+		lock -u "$LOCK"
+		return 10
+	fi
+	sec=$(plan_sec "$mac")
+	uci -q set "capmon.$sec=plan"
+	uci -q set "capmon.$sec.mac=$mac"
+	uci -q set "capmon.$sec.name=$name"
+	uci -q set "capmon.$sec.limit=$limit"
+	uci -q set "capmon.$sec.period=$period"
+	uci -q set "capmon.$sec.enabled=$enabled"
+	if ! save_plans; then
+		lock -u "$LOCK"
+		return 11
+	fi
+	table_up && do_sync force
+	lock -u "$LOCK"
+	push_async
+	return 0
+}
+
+cmd_plan_del() {
+	local mac="$1"
+	valid_mac "$mac" || return 1
+	lock "$LOCK"
+	init_state
+	uci -q delete "capmon.$(plan_sec "$mac")"
+	if ! save_plans; then
+		lock -u "$LOCK"
+		return 11
+	fi
+	table_up && do_sync force
+	lock -u "$LOCK"
+	push_async
+	return 0
+}
+
+cmd_server_get() {
+	local u t p i d
+	u=$(uci -q get capmon.main.server_url | tr -cd 'A-Za-z0-9.:/_-')
+	p=$(uci -q get capmon.main.server_pin | tr -cd 'A-Za-z0-9+/=')
+	t=$(read_token)
+	i=$(uci -q get capmon.main.router_id | tr -cd 'A-Za-z0-9_-')
+	d=$(uci -q get 'system.@system[0].hostname' | tr -cd 'A-Za-z0-9_-' | cut -c1-32)
+	printf '{"url":"%s","pin":"%s","router_id":"%s","default_id":"%s","token_set":%s,"enabled":%s}\n' "$u" "$p" "$i" "$d" "$([ -n "$t" ] && echo true || echo false)" "$(server_off && echo false || echo true)"
+}
+
+cmd_server_enable() {
+	case "$1" in
+		0|1) ;;
+		*) return 1 ;;
+	esac
+	if [ "$1" = "1" ] && app_off; then
+		return 12
+	fi
+	lock "$LOCK"
+	uci -q set capmon.main=capmon
+	uci -q set "capmon.main.server_enabled=$1"
+	if ! commit_config; then
+		lock -u "$LOCK"
+		return 11
+	fi
+	[ "$1" = "0" ] || rm -f "$RUN/sync_err"
+	lock -u "$LOCK"
+	return 0
+}
+
+cmd_app_enable() {
+	local rc=0
+	case "$1" in
+		0|1) ;;
+		*) return 1 ;;
+	esac
+	if [ "$1" = "1" ]; then
+		if ! app_off && table_up; then
+			return 0
+		fi
+		lock "$LOCK"
+		uci -q set capmon.main=capmon
+		uci -q set capmon.main.enabled=1
+		if [ "$(uci -q get capmon.main.server_resume)" = "1" ]; then
+			uci -q set capmon.main.server_enabled=1
+			uci -q delete capmon.main.server_resume
+		fi
+		if ! commit_config; then
+			lock -u "$LOCK"
+			return 11
+		fi
+		rm -f "$RUN/sync_err"
+		lock -u "$LOCK"
+		/etc/init.d/capmon enable > /dev/null 2>&1 < /dev/null
+		/etc/init.d/capmon start > /dev/null 2>&1 < /dev/null
+		return 0
+	fi
+	if app_off && ! table_up; then
+		return 0
+	fi
+	lock "$LOCK"
+	uci -q set capmon.main=capmon
+	uci -q set capmon.main.enabled=0
+	if ! commit_config; then
+		lock -u "$LOCK"
+		return 11
+	fi
+	lock -u "$LOCK"
+	/etc/init.d/capmon stop > /dev/null 2>&1 < /dev/null
+	lock "$LOCK"
+	cron_del
+	rm -f "$RUN/last" "$RUN/baseline" "$RUN/kill.list"
+	if [ "$(uci -q get capmon.main.server_enabled)" = "1" ]; then
+		uci -q set capmon.main.server_resume=1
+		uci -q set capmon.main.server_enabled=0
+	fi
+	commit_config || rc=11
+	lock -u "$LOCK"
+	/etc/init.d/capmon disable > /dev/null 2>&1 < /dev/null
+	return "$rc"
+}
+
+cmd_server_set() {
+	local url="${1%/}" id="$2" pin="$3" token="$CAPMON_TOKEN" oldu oldi
+	unset CAPMON_TOKEN
+	case "$pin" in
+		""|sha256//*) ;;
+		*) pin="sha256//$pin" ;;
+	esac
+	[ -z "$url" ] || valid_url "$url" || return 1
+	[ -z "$token" ] || valid_token "$token" || return 1
+	[ -z "$id" ] || valid_id "$id" || return 1
+	[ -z "$pin" ] || valid_pin "$pin" || return 1
+	lock "$LOCK"
+	oldu=$(uci -q get capmon.main.server_url)
+	oldi=$(uci -q get capmon.main.router_id)
+	if [ -n "$url" ] && [ -z "$token" ] && [ -z "$(read_token)" ]; then
+		lock -u "$LOCK"
+		return 1
+	fi
+	uci -q set capmon.main=capmon
+	uci -q set "capmon.main.server_url=$url"
+	uci -q set "capmon.main.router_id=$id"
+	uci -q set "capmon.main.server_pin=$pin"
+	uci -q delete capmon.main.token
+	[ -z "$token" ] || write_token "$token"
+	[ -n "$url" ] || rm -f "$TOKEN_FILE"
+	if ! commit_config; then
+		lock -u "$LOCK"
+		return 11
+	fi
+	if [ "$oldu" != "$url" ] || [ "$oldi" != "$id" ]; then
+		rm -f "$RUN/restored" "$RUN/sync_ok" "$RUN/sync_try" "$RUN/sync_err"
+	fi
+	lock -u "$LOCK"
+	return 0
+}
+
+import_clean() {
+	rm -f "$RUN/stats.imp" "$RUN/quota.imp" "$RUN/meta.imp" "$RUN/cfg.imp" "$RUN/import.in"
+	rm -rf "$RUN/import.tgz"
+}
+
+import_unpack() {
+	local list names sz
+	list=$(gzip -dc < "$RUN/import.tgz" 2> /dev/null | head -c "$IMPORT_TAR_MAX" | tar tvf - 2> /dev/null)
+	names=$(gzip -dc < "$RUN/import.tgz" 2> /dev/null | head -c "$IMPORT_TAR_MAX" | tar tf - 2> /dev/null)
+	[ "$names" = "$IMPORT_NAME" ] || return 15
+	case "$list" in
+		-*) ;;
+		*) return 15 ;;
+	esac
+	gzip -dc < "$RUN/import.tgz" 2> /dev/null | head -c "$IMPORT_TAR_MAX" | tar xOf - "$IMPORT_NAME" 2> /dev/null | head -c "$((IMPORT_MAX + 1))" > "$RUN/import.in"
+	sz=$(wc -c < "$RUN/import.in")
+	[ "$sz" -ge 1 ] && [ "$sz" -le "$IMPORT_MAX" ] || return 15
+	return 0
+}
+
+import_apply() {
+	local chg olds
+	init_state
+	need_restore && return 9
+	olds=$(uci -q show capmon | sed -n 's/^capmon\.\([A-Za-z0-9_]*\)=plan$/\1/p' | tr '\n' ' ')
+	chg=$(LC_ALL=C awk -v run="$RUN" -v fsize="$(wc -c < "$RUN/import.in")" -v now="$(date +%s)" -v today="$(date +%Y%m%d)" -v ocurl="$(uci -q get capmon.main.server_url)" -v ocid="$(uci -q get capmon.main.router_id)" -v olds="$olds" -f "$LIBX/lib.awk" -f "$LIBX/bcheck.awk" -f "$LIBX/import.awk" "$RUN/import.in" 2> /dev/null) || return 15
+	uci -q delete capmon.main.extra_dev
+	uci -q batch < "$RUN/cfg.imp" > /dev/null 2>&1
+	commit_config || return 11
+	mv "$RUN/stats.imp" "$RUN/stats" && mv "$RUN/quota.imp" "$RUN/quota" && mv "$RUN/meta.imp" "$RUN/meta" || return 11
+	rm -f "$RUN/pushed.stats" "$RUN/pushed.quota"
+	[ "$chg" != "chg" ] || rm -f "$RUN/restored" "$RUN/sync_ok" "$RUN/sync_try" "$RUN/sync_err"
+	refresh_all
+	sync_force
+	return 0
+}
+
+cmd_import() {
+	local rc=0 sz
+	if app_off; then
+		rm -f "$IMPORT"
+		return 12
+	fi
+	import_clean
+	mv -f "$IMPORT" "$RUN/import.tgz" 2> /dev/null || return 15
+	if [ -L "$RUN/import.tgz" ] || [ ! -f "$RUN/import.tgz" ]; then
+		import_clean
+		return 15
+	fi
+	sz=$(wc -c < "$RUN/import.tgz")
+	if [ "$sz" -lt 20 ] || [ "$sz" -gt "$IMPORT_TAR_MAX" ] || ! import_unpack; then
+		import_clean
+		return 15
+	fi
+	locked import_apply
+	rc=$?
+	import_clean
+	[ "$rc" != 0 ] || push_async
+	return "$rc"
+}
+
+cmd_export() {
+	local intv cr url pin sen rid xd rc
+	lock "$LOCK"
+	init_state
+	table_up && do_sync force
+	read_meta
+	intv=$(uci -q get capmon.main.interval)
+	cr=$(uci -q get capmon.main.count_router)
+	url=$(uci -q get capmon.main.server_url)
+	pin=$(uci -q get capmon.main.server_pin)
+	sen=$(uci -q get capmon.main.server_enabled)
+	rid=$(uci -q get capmon.main.router_id)
+	xd=$(uci -q get capmon.main.extra_dev)
+	LC_ALL=C awk -v pf="$RUN/plans" -v qf="$RUN/quota" -v sf="$RUN/stats" -v now="$(date +%s)" -v today="$(date +%Y%m%d)" -v since="$SINCE" -v day="$DAY" -v interval="$intv" -v count_router="$cr" -v server_url="$url" -v server_pin="$pin" -v server_enabled="$sen" -v router_id="$rid" -v extra_dev="$xd" -f "$LIBX/lib.awk" -f "$LIBX/bcheck.awk" -f "$LIBX/export.awk" "$RUN/plans" "$RUN/quota" "$RUN/stats"
+	rc=$?
+	lock -u "$LOCK"
+	return "$rc"
+}
+
+cmd_export_json() {
+	local out="$RUN/export.out"
+	if ! cmd_export > "$out"; then
+		rm -f "$out"
+		printf '{"error":"failed"}\n'
+		return 0
+	fi
+	awk 'BEGIN { printf "{\"data\":\"" } { printf "%s\\n", $0 } END { print "\"}" }' "$out"
+	rm -f "$out"
+}
+
+cmd_json() {
+	local act=0 acct=1 en=1 sc=0 sd=0 rs=1 sok=0 stry=0 serr="" off=""
+	lock "$LOCK"
+	init_state
+	table_up && do_sync stale
+	read_meta
+	lock -u "$LOCK"
+	table_up && act=1
+	app_off && en=0
+	[ -f "$RUN/acct" ] && read -r acct < "$RUN/acct"
+	[ "$acct" = "0" ] || acct=1
+	if load_server; then
+		sc=1
+		is_restored || rs=0
+	fi
+	server_off && sd=1
+	[ -f "$RUN/sync_ok" ] && read -r sok < "$RUN/sync_ok"
+	[ -f "$RUN/sync_try" ] && read -r stry < "$RUN/sync_try"
+	[ -f "$RUN/sync_err" ] && read -r serr < "$RUN/sync_err"
+	[ -f "$RUN/offload" ] && read -r off < "$RUN/offload"
+	case "$off" in
+		hw|sw) ;;
+		*) off="" ;;
+	esac
+	case "$sok" in
+		""|*[!0-9]*) sok=0 ;;
+	esac
+	case "$stry" in
+		""|*[!0-9]*) stry=0 ;;
+	esac
+	[ -n "$serr" ] || ! url_blocked || serr=insecure
+	case "$serr" in
+		offline|auth|server|tls|insecure) ;;
+		*) serr="" ;;
+	esac
+	awk -v since="$SINCE" -v day="$DAY" -v now="$(date +%s)" -v acct="$acct" -v active="$act" -v en="$en" -v sc="$sc" -v sd="$sd" -v rs="$rs" -v sok="$sok" -v stry="$stry" -v serr="$serr" -v offload="$off" -v pf="$RUN/plans" -v qf="$RUN/quota" -f "$LIBX/json.awk" "$RUN/plans" "$RUN/quota" "$RUN/stats"
+}
+
+case "$1" in
+	start) cmd_start ;;
+	daemon) cmd_daemon ;;
+	stop) cmd_stop ;;
+	apply) locked sync_force ;;
+	refresh)
+		app_off && exit 0
+		locked refresh_all
+		;;
+	cron) cmd_cron ;;
+	auto) cmd_auto ;;
+	retry) cmd_retry ;;
+	push) cmd_push ;;
+	syncnow) cmd_syncnow; exit $? ;;
+	bind) cmd_bind ;;
+	json) cmd_json ;;
+	export) cmd_export; exit $? ;;
+	export-json) cmd_export_json ;;
+	import) cmd_import; exit $? ;;
+	reset) cmd_reset; exit $? ;;
+	qreset) cmd_qreset "$2"; exit $? ;;
+	plan-set) cmd_plan_set "$2" "$3" "$4" "$5" "$6"; exit $? ;;
+	plan-del) cmd_plan_del "$2"; exit $? ;;
+	server-get) cmd_server_get ;;
+	server-set) cmd_server_set "$2" "$3" "$4"; exit $? ;;
+	server-enable) cmd_server_enable "$2"; exit $? ;;
+	app-enable) cmd_app_enable "$2"; exit $? ;;
+	*)
+		echo "usage: capmon start|stop|daemon|apply|refresh|cron|auto|retry|push|syncnow|bind|json|reset|qreset|plan-set|plan-del|server-get|server-set|server-enable|app-enable|export|import" >&2
+		exit 1
+		;;
+esac
+
+exit 0

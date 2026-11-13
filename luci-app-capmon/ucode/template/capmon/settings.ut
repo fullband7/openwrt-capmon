@@ -1,0 +1,85 @@
+{#
+	Capmon Quota Manager
+	Copyright 2026 fullband7 (https://github.com/fullband7)
+	Licensed under the Apache License, Version 2.0
+	SPDX-License-Identifier: Apache-2.0
+#}
+
+{% include('header') %}
+
+{%
+	const labels = {
+		main_switch: _('Main Switch'),
+		app_off: _('Quota is Disabled. Turn it on from the App Settings page.'),
+		sync_title: _('Data Sync'),
+		sync: _('Sync Data'),
+		syncing: _('Syncing…'),
+		st_loading: _('Checking the server…'),
+		st_nocfg: _('No server is configured. Usage data is kept in the router RAM only and is lost on reboot.'),
+		st_disabled: _('Syncing is turned off. Usage data is kept in the router RAM only and is lost on reboot.'),
+		st_wait: _('Waiting for the data server. Data in the router RAM is kept and will be merged with the saved data automatically.'),
+		st_synced: _('Synced with the data server on %s'),
+		st_last: _('Last Sync: %s'),
+		st_offline: _('The server is unreachable. Data is kept in the router RAM and will be sent automatically when the server is back.'),
+		st_server: _('The server returned an error. Data is kept in the router RAM.'),
+		st_auth: _('The server rejected the access token. Check the server settings.'),
+		st_tls: _('The secure connection to the data server failed. Check the server address and the certificate pin.'),
+		st_insecure: _('The saved server address uses unencrypted http://. Enter an https:// address and save again.'),
+		srv_title: _('Database Server'),
+		srv_help: _('Usage data can be stored on a server running the CSV database. The connection is encrypted; paste the certificate pin printed by the server so the router only trusts that server. Data plans and server settings are kept in the router configuration.'),
+		srv_on: _('Enabled'),
+		srv_off: _('Disabled'),
+		srv_url: _('Server Address'),
+		srv_token: _('Access Token'),
+		srv_token_keep: _('Leave empty to keep the current token'),
+		srv_id: _('Router Name (Optional)'),
+		srv_pin: _('Certificate Pin'),
+		err_url: _('Enter an address like https://192.168.1.50:8765'),
+		err_token: _('The access token must be 16 to 128 letters, digits, dots, dashes or underscores.'),
+		err_id: _('The router name may only contain letters, digits, dashes and underscores.'),
+		err_pin: _('The certificate pin must look like sha256//followed by 43 characters and an equals sign.'),
+		err: _('Unable to load the sync status.'),
+		save_changes: _('Save Changes'),
+		srv_saved: _('Server settings saved.'),
+		reset: _('Reset Data'),
+		reset_title: _('Reset all data?'),
+		reset_text: _('All recorded usage, including the used data of every data plan, will be erased and counting starts again from zero. ACL data plans are excluded.'),
+		confirm: _('Reset'),
+		bk_title: _('Export and Import'),
+		bk_help: _('Export saves the usage data, the data plans and the settings of this router into one compressed backup file (.tar.gz) and you can import the backup file to restore all of your data.'),
+		bk_off: _('Quota is Disabled. Turn it on to import a backup.'),
+		bk_export: _('Export'),
+		bk_import: _('Import'),
+		bk_preparing: _('Preparing the files…'),
+		bk_scanning: _('Scanning the files…'),
+		bk_uploading: _('Uploading the files…'),
+		bk_applying: _('Applying the data…'),
+		bk_modal_text: _('Upload your (.tar.gz) backup file.'),
+		bk_browse: _('Browse'),
+		bk_confirm_text: _('The usage data, the data plans and the settings of this router will be replaced by the content of the file. This cannot be undone.'),
+		bk_confirm_srv: _('If the server address in the file differs from the current one, syncing is turned off until you enable it again.'),
+		bk_confirm_btn: _('Import'),
+		bk_clients: _('Clients'),
+		bk_plans: _('Data Plans'),
+		bk_created: _('Created'),
+		bk_err_type: _('Choose a backup file exported from Quota Manager (.tar.gz).'),
+		bk_err_size: _('The file is empty or larger than 1 MB.'),
+		bk_err_arch: _('The file is not a valid Quota Manager backup archive.'),
+		bk_err_gz: _('This browser cannot create or read compressed backups. Please use an up-to-date browser.'),
+		bk_err_scan: _('The file is not a valid Quota Manager backup (problem near line %s).'),
+		bk_err_upload: _('The upload failed.'),
+		bk_err_export: _('The backup could not be created.')
+	};
+%}
+
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261108150000">
+
+<h2 name="content">{{ entityencode(_('App Settings')) }}</h2>
+
+{% include('capmon/root', { labels }) %}
+
+<script src="{{ resource }}/capmon/common.js?v=20261108150000"></script>
+<script src="{{ resource }}/capmon/backup.js?v=20261108150000"></script>
+<script src="{{ resource }}/capmon/settings.js?v=20261108150000"></script>
+
+{% include('footer') %}

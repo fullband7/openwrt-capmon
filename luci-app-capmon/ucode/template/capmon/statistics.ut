@@ -1,0 +1,48 @@
+{#
+	Capmon Quota Manager
+	Copyright 2026 fullband7 (https://github.com/fullband7)
+	Licensed under the Apache License, Version 2.0
+	SPDX-License-Identifier: Apache-2.0
+#}
+
+{% include('header') %}
+
+{%
+	const labels = {
+		download: _('Download'),
+		upload: _('Upload'),
+		total: _('Total'),
+		alltime: _('All Time'),
+		today: _('Today'),
+		yesterday: _('Yesterday'),
+		lastweek: _('Last Week'),
+		lastmonth: _('Last Month'),
+		clients: _('Clients'),
+		client: _('Client'),
+		ip: _('IP address'),
+		mac: _('MAC address'),
+		since: _('Tracking since'),
+		unknown: _('Unknown device'),
+		router: _('OpenWrt'),
+		empty: _('No internet traffic has been recorded yet.'),
+		empty_period: _('No internet traffic was recorded for this period.'),
+		err: _('Unable to load usage data.'),
+		inactive: _('The accounting service is not running. Enable it under System → Startup.'),
+		noacct: _('Connection accounting is turned off in the kernel, so traffic cannot be counted. Restart the Quota Manager service to turn it on.'),
+		online: _('Active now'),
+		last: _('Last seen'),
+		off: _('Quota is Disabled. Turn it on from the App Settings page.')
+	};
+%}
+
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261108150000">
+
+<h2 name="content">{{ entityencode(_('Data Usage Monitor')) }}</h2>
+<div class="cbi-map-descr">{{ entityencode(_('Monitor and manage the internet data usage of every client on your network.')) }}</div>
+
+{% include('capmon/root', { labels }) %}
+
+<script src="{{ resource }}/capmon/common.js?v=20261108150000"></script>
+<script src="{{ resource }}/capmon/stats.js?v=20261108150000"></script>
+
+{% include('footer') %}

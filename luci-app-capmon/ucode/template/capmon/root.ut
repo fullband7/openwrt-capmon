@@ -1,0 +1,29 @@
+{#
+	Capmon Quota Manager
+	Copyright 2026 fullband7 (https://github.com/fullband7)
+	Licensed under the Apache License, Version 2.0
+	SPDX-License-Identifier: Apache-2.0
+#}
+
+{%
+	const common = {
+		save: _('Save'),
+		cancel: _('Cancel'),
+		never: _('Never'),
+		e_not_configured: _('No data server is configured.'),
+		e_auth: _('The data server rejected the access token.'),
+		e_offline: _('The data server is unreachable.'),
+		e_server: _('The data server returned an error.'),
+		e_tls: _('The secure connection to the data server failed. Check the server address and the certificate pin.'),
+		e_insecure: _('Unencrypted http:// server addresses are not allowed. Use an https:// address.'),
+		e_bad_data: _('The data received from the server was not valid.'),
+		e_not_synced: _('Your saved data has not been restored from the server yet. Try again after the server is reachable.'),
+		e_too_many: _('The maximum number of plans has been reached.'),
+		e_app_disabled: _('Quota is Disabled. Turn it on from the App Settings page first.'),
+		e_bad_backup: _('The router rejected the backup file because it is not valid.'),
+		e_failed: _('The operation failed.')
+	};
+%}
+<div id="cm-root"{% for (let k, v in common): %} data-t-{{ k }}="{{ entityencode(v, true) }}"{% endfor %}{% for (let k, v in labels): %} data-t-{{ k }}="{{ entityencode(v, true) }}"{% endfor %}>
+	<div class="spinning">{{ entityencode(_('Loading…')) }}</div>
+</div>

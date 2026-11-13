@@ -1,0 +1,45 @@
+{
+	"admin/services/capmon": {
+		"title": "Quota Manager",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-capmon" ]
+		}
+	},
+	"admin/services/capmon/statistics": {
+		"title": "Statistics",
+		"order": 1,
+		"action": {
+			"type": "template",
+			"path": "capmon/statistics"
+		},
+		"depends": {
+			"acl": [ "luci-app-capmon" ]
+		}
+	},
+	"admin/services/capmon/acl": {
+		"title": "Access Control",
+		"order": 2,
+		"action": {
+			"type": "template",
+			"path": "capmon/acl"
+		},
+		"depends": {
+			"acl": [ "luci-app-capmon" ]
+		}
+	},
+	"admin/services/capmon/settings": {
+		"title": "App Settings",
+		"order": 3,
+		"action": {
+			"type": "template",
+			"path": "capmon/settings"
+		},
+		"depends": {
+			"acl": [ "luci-app-capmon" ]
+		}
+	}
+}

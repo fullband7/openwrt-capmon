@@ -1,0 +1,8 @@
+config capmon 'main'
+	option enabled '1'
+	option interval '10'
+	option count_router '1'
+	option server_url ''
+	option server_pin ''
+	option server_enabled '0'
+	option router_id ''
