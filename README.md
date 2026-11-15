@@ -182,12 +182,6 @@ In the desktop app, press **Reset Credentials** in App Settings and confirm. The
 
 With the command line server, start it once with `--reset-token` to create a new token and clear the paired router, then enter the new token on the router.
 
-### One router at a time
-
-By default the server pairs with the first router that sends valid data. Any other router, or the same router name coming from a different IP address, is blocked. The desktop app shows a warning in App Settings and a tray notification when this happens. To pair a new router, use **Reset Credentials** in the desktop app, or start the command line server with `--reset-pairing`.
-
-If you want to collect several routers in one server, start the command line server with `--allow-multiple-routers`. Each router needs its own **Router Name**, and a drop-down appears in the desktop app to switch between them.
-
 ## Command line options
 
 These options are for `capmon_server.py` :
