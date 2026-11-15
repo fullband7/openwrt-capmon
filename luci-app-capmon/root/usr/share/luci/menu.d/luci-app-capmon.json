@@ -32,7 +32,7 @@
 		}
 	},
 	"admin/services/capmon/settings": {
-		"title": "App Settings",
+		"title": "Settings",
 		"order": 3,
 		"action": {
 			"type": "template",

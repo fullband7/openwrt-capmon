@@ -9,24 +9,19 @@
 
 {%
 	const labels = {
-		about_text: _('CapMon lets you see how much internet each device on your network is using, Create a data plan for a device, choose its allowance, speed limit and renewal period, and the router takes care of the rest.'),
-		check_btn: _('Check for Update'),
 		checking: _('Checking...'),
-		fetching: _('Fetching releases page from GitHub…'),
 		up_title: _('Update Available'),
-		up_sub: _('A new version is available. Use the script below to install it.'),
-		ok_title: _('App is Up to Date!'),
-		ok_sub: _('No New Version Found'),
+		up_sub: _('A new version is available. Use the command below to install it.'),
+		ok_title: _('Application is Up to Date!'),
+		ok_sub: _('No New Version Found.'),
 		installed: _('Installed'),
 		latest: _('Latest'),
 		pkg: _('pkg'),
 		version: _('Version'),
 		notes: _('Release Notes'),
 		avail_pre: _('Version'),
-		avail_post: _('is available. Use the script below to install it.'),
+		avail_post: _('is available. Use the command below to install it.'),
 		no_asset: _('No installable package was found in this release. Download it from the releases page.'),
-		ssh: _('SSH'),
-		copy: _('Copy'),
 		copied: _('Copied!'),
 		copy_failed: _('Failed!'),
 		err_title: _('Cannot reach GitHub'),
@@ -35,12 +30,7 @@
 		e_parse: _('GitHub responded but the release data could not be read.'),
 		e_state: _('The temporary state directory is unavailable.'),
 		e_repo: _('The update repository is not configured correctly.'),
-		e_unknown: _('The update check failed.'),
-		powered: _('Powered By :'),
-		logo1_alt: _('Logo 1'),
-		logo2_alt: _('Logo 2'),
-		logo1_url: '',
-		logo2_url: ''
+		e_unknown: _('The update check failed.')
 	};
 %}
 
@@ -48,7 +38,49 @@
 
 <h2 name="content">{{ entityencode(_('About')) }}</h2>
 
-{% include('capmon/root', { labels }) %}
+<div id="cm-root"{% for (let k, v in labels): %} data-t-{{ k }}="{{ entityencode(v, true) }}"{% endfor %}>
+	<div id="cmu-page" class="cm-card cmu cmu-page">
+		<div class="cmu-about">
+			<p class="cmu-text">{{ entityencode(_('CapMon lets you see how much internet each device on your network is using, Create a data plan for a device, choose its allowance, speed limit and renewal period, and the router takes care of the rest.')) }} </br> {{ entityencode(_('For more information on how to configure the app, read the GitHub')) }} <a href="https://github.com/fullband7/openwrt-capmon/blob/main/README.md" target="_blank" rel="noopener noreferrer">{{ entityencode(_('Readme')) }}<svg class="cmu-ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 15L16 8"/><path d="M10 8h6v6"/></svg></a></p>
+		</div>
+
+		<div class="cmu-divider"></div>
+
+		<div class="cmu-check-row">
+			<button type="button" id="cmu-check" class="cmu-check-btn">
+				<span id="cmu-check-ico" class="cmu-check-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4.12 10.61A8 8 0 0 1 18.93 8M15.17 6.63L18.93 8L19.63 4.06M19.88 13.39A8 8 0 0 1 5.07 16M8.83 17.37L5.07 16L4.37 19.94"/></svg></span>
+				<span id="cmu-check-lbl" class="cmu-check-lbl">{{ entityencode(_('Check for Update')) }}</span>
+			</button>
+		</div>
+
+		<div id="cmu-fetching" class="cmu-fetching" hidden>{{ entityencode(_('Fetching releases page from GitHub…')) }}</div>
+
+		<div class="cmu-divider"></div>
+
+		<div id="cmu-status"></div>
+
+		<div id="cmu-install" class="cmu-install"></div>
+
+		<div id="cmu-ssh" class="cmu-ssh" hidden>
+			<div class="cmu-ssh-head">
+				<span class="cmu-mono">{{ entityencode(_('SSH')) }}</span>
+				<button type="button" id="cmu-copy" class="cmu-copy-btn"><span class="cmu-copy-text">{{ entityencode(_('Copy')) }}</span></button>
+			</div>
+			<pre class="cmu-ssh-body"><code id="cmu-cmd">wget -qO /tmp/capmon-installer.sh https://raw.githubusercontent.com/fullband7/openwrt-capmon/main/luci-app-capmon/installer.sh &amp;&amp; sh /tmp/capmon-installer.sh; rm -f /tmp/capmon-installer.sh</code></pre>
+		</div>
+
+		<div class="cmu-divider"></div>
+
+		<div class="cmu-powered">
+			<div class="cmu-powered-l">{{ entityencode(_('Powered By :')) }}</div>
+			<div class="cmu-logos">
+				<div class="cmu-logo cmu-logo-1" role="img" aria-label="{{ entityencode(_('Logo 1'), true) }}"></div>
+				<div class="cmu-logo cmu-logo-2" role="img" aria-label="{{ entityencode(_('Logo 2'), true) }}"></div>
+			</div>
+			<div class="cmu-copyright">{{ entityencode(_('Copyright © 2026')) }} <a href="https://github.com/fullband7" target="_blank" rel="noopener noreferrer">{{ entityencode(_('FullBand7')) }}<svg class="cmu-ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 15L16 8"/><path d="M10 8h6v6"/></svg></a> {{ entityencode(_('· Licensed under the Apache License, Version 2.0 ·')) }} <a href="https://github.com/fullband7/openwrt-capmon" target="_blank" rel="noopener noreferrer">{{ entityencode(_('OpenWrt CapMon')) }}<svg class="cmu-ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 15L16 8"/><path d="M10 8h6v6"/></svg></a></div>
+		</div>
+	</div>
+</div>
 
 <script src="{{ resource }}/capmon/common.js?v=20261115051500"></script>
 <script src="{{ resource }}/capmon/about.js?v=20261115051500"></script>
