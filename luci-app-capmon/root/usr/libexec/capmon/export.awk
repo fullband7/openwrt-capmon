@@ -34,7 +34,7 @@ FILENAME == pf {
 	if (NF >= 5 && nplans < 128 && !($1 in plim) && bplan($1, $2, $3, $4, $5)) {
 		nplans++
 		plim[$1] = $3 + 0
-		plines[nplans] = "plan," $1 "," $2 "," num($3) "," $4 "," $5
+		plines[nplans] = "plan," $1 "," $2 "," num($3) "," $4 "," $5 "," (bspeed($6) ? num($6) : "0")
 	}
 	next
 }

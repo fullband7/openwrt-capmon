@@ -41,5 +41,16 @@
 		"depends": {
 			"acl": [ "luci-app-capmon" ]
 		}
+	},
+	"admin/services/capmon/about": {
+		"title": "About",
+		"order": 4,
+		"action": {
+			"type": "template",
+			"path": "capmon/about"
+		},
+		"depends": {
+			"acl": [ "luci-app-capmon" ]
+		}
 	}
 }

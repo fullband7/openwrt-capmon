@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-capmon
-PKG_VERSION:=1.7.0
-PKG_RELEASE:=2
+PKG_VERSION:=1.7.1
+PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=Capmon Quota Manager
 
@@ -13,7 +13,7 @@ define Package/luci-app-capmon
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI Quota Manager - per-client internet statistics and data plans
-  DEPENDS:=+luci-base +rpcd +firewall4 +curl +jshn +conntrack +cgi-io
+  DEPENDS:=+luci-base +rpcd +firewall4 +curl +jshn +conntrack +cgi-io +jsonfilter
   PKGARCH:=all
 endef
 

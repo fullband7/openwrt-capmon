@@ -21,6 +21,7 @@ HEADER_V2="$HEADER_V1,yup,ydn"
 HEADER_V3="$HEADER_V2,mup,mdn,lup,ldn"
 HEADER="$HEADER_V3,wup,wdn,pup,pdn"
 MAX_PLANS=128
+SPEED_MAX=10000
 DEVS=""
 SINCE=""
 DAY=""
@@ -89,6 +90,13 @@ valid_limit() {
 		""|0|*[!0-9]*) return 1 ;;
 	esac
 	[ "${#1}" -le 15 ]
+}
+
+valid_speed() {
+	case "$1" in
+		""|*[!0-9]*|0?*) return 1 ;;
+	esac
+	[ "${#1}" -le 5 ] && [ "$1" -le "$SPEED_MAX" ]
 }
 
 valid_token() {
@@ -220,6 +228,9 @@ table inet capmon {
 		meta nfproto ipv4 iifname @wanif ip daddr @blk4 drop
 		meta nfproto ipv6 iifname @wanif ip6 daddr @blk6 drop
 	}
+	chain speed {
+		type filter hook forward priority 11; policy accept;
+	}
 }
 EOF
 }
@@ -277,10 +288,11 @@ do_refresh() {
 apply_block() {
 	local a
 	table_up || return 0
-	if ! cmp -s "$RUN/block.new" "$RUN/block.nft" 2> /dev/null; then
-		nft -f "$RUN/block.new" > /dev/null 2>&1 && mv "$RUN/block.new" "$RUN/block.nft"
+	grep -v '^delete limit ' "$RUN/block.new" > "$RUN/block.cmp"
+	if ! cmp -s "$RUN/block.cmp" "$RUN/block.nft" 2> /dev/null; then
+		nft -f "$RUN/block.new" > /dev/null 2>&1 && mv "$RUN/block.cmp" "$RUN/block.nft"
 	fi
-	rm -f "$RUN/block.new"
+	rm -f "$RUN/block.new" "$RUN/block.cmp"
 	[ -s "$RUN/kill.list" ] || return 0
 	command -v conntrack > /dev/null 2>&1 || return 0
 	while read -r a; do
@@ -359,21 +371,23 @@ plan_sec() {
 }
 
 plan_cb() {
-	local sec="$1" mac name limit period enabled
+	local sec="$1" mac name limit period enabled speed
 	config_get mac "$sec" mac
 	config_get name "$sec" name
 	config_get limit "$sec" limit
 	config_get period "$sec" period
 	config_get enabled "$sec" enabled
+	config_get speed "$sec" speed
 	valid_mac "$mac" || return 0
 	valid_limit "$limit" || return 0
+	valid_speed "$speed" || speed=0
 	case "$period" in
 		daily|weekly|monthly) ;;
 		*) period=none ;;
 	esac
 	[ "$enabled" = "0" ] || enabled=1
 	name=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-32)
-	printf '%s\t%s\t%s\t%s\t%s\n' "$mac" "$name" "$limit" "$period" "$enabled" >> "$RUN/plans.new"
+	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mac" "$name" "$limit" "$period" "$enabled" "$speed" >> "$RUN/plans.new"
 }
 
 load_plans() {
@@ -900,9 +914,10 @@ cmd_qreset() {
 }
 
 cmd_plan_set() {
-	local mac="$1" name="$2" limit="$3" period="$4" enabled="$5" n sec
+	local mac="$1" name="$2" limit="$3" period="$4" enabled="$5" speed="$6" n sec
 	valid_mac "$mac" || return 1
 	valid_limit "$limit" || return 1
+	[ -z "$speed" ] || [ "$speed" = "0" ] || valid_speed "$speed" || return 1
 	case "$period" in
 		none|daily|weekly|monthly) ;;
 		*) return 1 ;;
@@ -926,6 +941,11 @@ cmd_plan_set() {
 	uci -q set "capmon.$sec.limit=$limit"
 	uci -q set "capmon.$sec.period=$period"
 	uci -q set "capmon.$sec.enabled=$enabled"
+	case "$speed" in
+		"") ;;
+		0) uci -q delete "capmon.$sec.speed" ;;
+		*) uci -q set "capmon.$sec.speed=$speed" ;;
+	esac
 	if ! save_plans; then
 		lock -u "$LOCK"
 		return 11
@@ -1220,7 +1240,7 @@ case "$1" in
 	import) cmd_import; exit $? ;;
 	reset) cmd_reset; exit $? ;;
 	qreset) cmd_qreset "$2"; exit $? ;;
-	plan-set) cmd_plan_set "$2" "$3" "$4" "$5" "$6"; exit $? ;;
+	plan-set) cmd_plan_set "$2" "$3" "$4" "$5" "$6" "$7"; exit $? ;;
 	plan-del) cmd_plan_del "$2"; exit $? ;;
 	server-get) cmd_server_get ;;
 	server-set) cmd_server_set "$2" "$3" "$4"; exit $? ;;

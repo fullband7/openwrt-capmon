@@ -26,6 +26,13 @@
 		label: _('Label (optional)'),
 		label_ph: _('For example: Guest phone'),
 		allowance: _('Allowance'),
+		speed: _('Speed limit'),
+		speed_label: _('Speed Limit :'),
+		unlimited: _('Unlimited'),
+		custom: _('Custom…'),
+		mbps: _('Mbps'),
+		err_speed: _('Enter a whole number of megabits per second between 1 and 10000.'),
+		offload: _('Flow offloading is enabled on this router, so speed limits may not be applied. Disable it under Network → Firewall.'),
 		resets: _('Renews'),
 		r_none: _('Never (reset manually)'),
 		r_daily: _('Every day'),
@@ -57,13 +64,13 @@
 	};
 %}
 
-<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261108150000">
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261115051500">
 
 <h2 name="content">{{ entityencode(_('Quota ACL')) }}</h2>
 
 {% include('capmon/root', { labels }) %}
 
-<script src="{{ resource }}/capmon/common.js?v=20261108150000"></script>
-<script src="{{ resource }}/capmon/acl.js?v=20261108150000"></script>
+<script src="{{ resource }}/capmon/common.js?v=20261115051500"></script>
+<script src="{{ resource }}/capmon/acl.js?v=20261115051500"></script>
 
 {% include('footer') %}

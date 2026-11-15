@@ -72,14 +72,14 @@
 	};
 %}
 
-<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261108150000">
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261115051500">
 
 <h2 name="content">{{ entityencode(_('App Settings')) }}</h2>
 
 {% include('capmon/root', { labels }) %}
 
-<script src="{{ resource }}/capmon/common.js?v=20261108150000"></script>
-<script src="{{ resource }}/capmon/backup.js?v=20261108150000"></script>
-<script src="{{ resource }}/capmon/settings.js?v=20261108150000"></script>
+<script src="{{ resource }}/capmon/common.js?v=20261115051500"></script>
+<script src="{{ resource }}/capmon/backup.js?v=20261115051500"></script>
+<script src="{{ resource }}/capmon/settings.js?v=20261115051500"></script>
 
 {% include('footer') %}

@@ -38,9 +38,10 @@ BEGIN {
 		cfg[$2] = $3
 		ncfg++
 	} else if (t == "plan") {
-		if (NF != 6 || !bplan($2, $3, $4, $5, $6) || ($2 in plim) || nplans >= 128)
+		if ((NF != 6 && NF != 7) || !bplan($2, $3, $4, $5, $6) || (NF == 7 && !bspeed($7)) || ($2 in plim) || nplans >= 128)
 			fail("invalid plan")
 		nplans++
+		pspd[$2] = (NF == 7) ? $7 + 0 : 0
 		plim[$2] = $4 + 0
 		pord[nplans] = $2
 		pname[$2] = $3
@@ -122,6 +123,8 @@ END {
 		print "set capmon.plan_" sec ".limit='" num(plim[m]) "'" > co
 		print "set capmon.plan_" sec ".period='" pper[m] "'" > co
 		print "set capmon.plan_" sec ".enabled='" pen[m] "'" > co
+		if (pspd[m] > 0)
+			print "set capmon.plan_" sec ".speed='" num(pspd[m]) "'" > co
 	}
 	close(co)
 	print (chg ? "chg" : "same")

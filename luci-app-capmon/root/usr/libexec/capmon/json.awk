@@ -38,6 +38,7 @@ FILENAME == pf {
 		plim[np] = $3 + 0
 		pper[np] = clean($4)
 		pen[np] = ($5 == "1") ? 1 : 0
+		pspd[np] = ($6 ~ /^[0-9]+$/ && length($6) <= 5) ? $6 + 0 : 0
 	}
 	next
 }
@@ -88,7 +89,7 @@ END {
 		if (plim[i] > 0 && u > plim[i])
 			u = plim[i]
 		ex = (pen[i] == 1 && plim[i] > 0 && u >= plim[i]) ? "true" : "false"
-		printf "{\"mac\":\"%s\",\"name\":\"%s\",\"limit\":%.0f,\"period\":\"%s\",\"enabled\":%s,\"used\":%.0f,\"exceeded\":%s}", pmac[i], pname[i], plim[i], pper[i], (pen[i] == 1 ? "true" : "false"), u, ex
+		printf "{\"mac\":\"%s\",\"name\":\"%s\",\"limit\":%.0f,\"period\":\"%s\",\"enabled\":%s,\"speed\":%.0f,\"used\":%.0f,\"exceeded\":%s}", pmac[i], pname[i], plim[i], pper[i], (pen[i] == 1 ? "true" : "false"), pspd[i], u, ex
 	}
 	printf "],\"sync\":{\"configured\":%s,\"disabled\":%s,\"restored\":%s,\"ok\":%.0f,\"try\":%.0f,\"error\":\"%s\"}}\n", (sc == 1 ? "true" : "false"), (sd == 1 ? "true" : "false"), (rs == 1 ? "true" : "false"), sok + 0, stry + 0, clean(serr)
 }

@@ -3,7 +3,7 @@
 		"description": "Grant access to Quota Manager",
 		"read": {
 			"ubus": {
-				"capmon": [ "get", "server_get", "export" ],
+				"capmon": [ "get", "server_get", "export", "check_update" ],
 				"luci-rpc": [ "getHostHints" ]
 			}
 		},

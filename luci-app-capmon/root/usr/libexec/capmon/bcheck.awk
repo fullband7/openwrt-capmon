@@ -64,6 +64,10 @@ function bplan(m, n, l, p, e) {
 	return (e == "0" || e == "1")
 }
 
+function bspeed(s) {
+	return (s ~ /^(0|[1-9][0-9]*)$/ && length(s) <= 5 && s + 0 <= 10000)
+}
+
 function bip(s,   a, i) {
 	if (s == "-")
 		return 1

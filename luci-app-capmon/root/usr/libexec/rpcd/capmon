@@ -53,18 +53,19 @@ get_mac() {
 }
 
 plan_set() {
-	local name limit period enabled rc
+	local name limit period enabled speed rc
 	read_input
 	get_mac
 	json_get_var name name
 	json_get_var limit limit
 	json_get_var period period
 	json_get_var enabled enabled
+	json_get_var speed speed
 	case "$enabled" in
 		0|false) enabled=0 ;;
 		*) enabled=1 ;;
 	esac
-	/usr/sbin/capmon plan-set "$MAC" "$name" "$limit" "$period" "$enabled" > /dev/null 2>&1
+	/usr/sbin/capmon plan-set "$MAC" "$name" "$limit" "$period" "$enabled" "$speed" > /dev/null 2>&1
 	rc=$?
 	[ "$rc" = 1 ] && fail "invalid input"
 	map_rc "$rc"
@@ -121,9 +122,182 @@ app_enable() {
 	map_rc "$?"
 }
 
+UPDATE_REPO="fullband7/openwrt-capmon"
+UPDATE_PKG="luci-app-capmon"
+UPDATE_DIR="/var/run/capmon"
+UPDATE_TTL=21600
+UPDATE_FORCE_MIN=60
+UPDATE_MAX_BYTES=120000
+UPDATE_FIELD_MAX=128
+UPDATE_BODY_MAX=10000
+
+is_number() {
+	case "$1" in
+		""|*[!0-9]*) return 1 ;;
+	esac
+	return 0
+}
+
+json_escape() {
+	printf '%s' "$1" \
+		| tr -d '\000-\010\013-\037\177' \
+		| sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' \
+		| sed -e ':a;N;$!ba;s/\n/\\n/g'
+}
+
+valid_repo() {
+	case "$1" in
+		""|/*|*/|*..*|*/*/*|*[!A-Za-z0-9._/-]*) return 1 ;;
+		*/*) return 0 ;;
+	esac
+	return 1
+}
+
+get_pkg_manager() {
+	if command -v apk > /dev/null 2>&1; then
+		echo apk
+	else
+		echo opkg
+	fi
+}
+
+get_current_version() {
+	if [ "$1" = "apk" ]; then
+		apk list --installed "$UPDATE_PKG" 2> /dev/null | sed -n "s/^${UPDATE_PKG}-\([0-9][0-9.]*\).*/\1/p" | head -n 1
+	else
+		opkg list-installed "$UPDATE_PKG" 2> /dev/null | sed -n "s/^${UPDATE_PKG}[[:space:]]*-[[:space:]]*\([0-9][0-9.-]*\).*/\1/p" | head -n 1
+	fi
+}
+
+strip_v() {
+	printf '%s' "$1" | sed -e 's/^[vV]//' -e 's/[[:space:]]//g'
+}
+
+is_release_url() {
+	case "$1" in
+		"https://github.com/$UPDATE_REPO/releases/download/"?*) ;;
+		*) return 1 ;;
+	esac
+	case "$1" in
+		*..*|*[!A-Za-z0-9._~:/%+@=-]*) return 1 ;;
+	esac
+	return 0
+}
+
+fetch_release() {
+	curl -q -sS --fail --connect-timeout 5 --max-time 15 --max-filesize "$UPDATE_MAX_BYTES" \
+		--proto '=https' --tlsv1.2 \
+		-H 'Accept: application/vnd.github+json' -A 'OpenWrt-LuCI-Updater/1.0' \
+		--url "https://api.github.com/repos/$UPDATE_REPO/releases/latest" 2> /dev/null | head -c "$UPDATE_MAX_BYTES"
+}
+
+update_error() {
+	printf '{"error":"%s","update_available":false,"current_version":"%s","pkg_manager":"%s"}\n' \
+		"$1" "$(json_escape "$current_ver")" "$pkg_mgr"
+}
+
+check_update() {
+	local force raw tag name body raw_assets assets_json download_url fallback_url pkg_ext a
+	local cache cached cache_fresh cache_time cache_age now tmp_cache
+	local latest_tag release_name release_body release_assets release_download latest_clean current_clean update_available
+
+	umask 077
+	read_input
+	json_get_var force force
+
+	pkg_mgr=$(get_pkg_manager)
+	current_ver=$(get_current_version "$pkg_mgr")
+	[ -n "$current_ver" ] || current_ver="unknown"
+
+	valid_repo "$UPDATE_REPO" || { update_error repo; return; }
+	[ ! -L "$UPDATE_DIR" ] || { update_error state; return; }
+	[ -d "$UPDATE_DIR" ] || mkdir -p "$UPDATE_DIR" 2> /dev/null
+	[ -d "$UPDATE_DIR" ] && [ -O "$UPDATE_DIR" ] || { update_error state; return; }
+	chmod 700 "$UPDATE_DIR" 2> /dev/null
+
+	cache="$UPDATE_DIR/update_cache.json"
+	cache_fresh=0
+	if [ -f "$cache" ] && [ ! -L "$cache" ]; then
+		cache_time=$(date -r "$cache" +%s 2> /dev/null)
+		is_number "$cache_time" || cache_time=0
+		now=$(date +%s)
+		cache_age=$((now - cache_time))
+		if [ "$cache_age" -ge 0 ]; then
+			if [ "$force" = "1" ] || [ "$force" = "true" ]; then
+				[ "$cache_age" -lt "$UPDATE_FORCE_MIN" ] && cache_fresh=1
+			else
+				[ "$cache_age" -lt "$UPDATE_TTL" ] && cache_fresh=1
+			fi
+		fi
+	fi
+
+	if [ "$cache_fresh" = "1" ]; then
+		IFS= read -r cached < "$cache" 2> /dev/null
+	else
+		raw=$(fetch_release)
+		[ -n "$raw" ] || { update_error unreachable; return; }
+		tag=$(jsonfilter -s "$raw" -e '@.tag_name' 2> /dev/null | head -c "$UPDATE_FIELD_MAX")
+		[ -n "$tag" ] || { update_error parse; return; }
+		name=$(jsonfilter -s "$raw" -e '@.name' 2> /dev/null | head -c "$UPDATE_FIELD_MAX")
+		body=$(jsonfilter -s "$raw" -e '@.body' 2> /dev/null | head -c "$UPDATE_BODY_MAX")
+		raw_assets=$(jsonfilter -s "$raw" -e '@.assets[*].browser_download_url' 2> /dev/null)
+
+		assets_json=""
+		download_url=""
+		fallback_url=""
+		pkg_ext="ipk"
+		[ "$pkg_mgr" = "apk" ] && pkg_ext="apk"
+		while IFS= read -r a; do
+			[ -n "$a" ] || continue
+			is_release_url "$a" || continue
+			assets_json="$assets_json\"$(json_escape "$a")\","
+			case "$a" in
+				*.*"$pkg_ext") [ -n "$download_url" ] || download_url="$a" ;;
+			esac
+			case "$a" in
+				*.ipk|*.apk) [ -n "$fallback_url" ] || fallback_url="$a" ;;
+			esac
+		done <<EOF
+$raw_assets
+EOF
+		[ -n "$download_url" ] || download_url="$fallback_url"
+		assets_json=$(printf '%s' "$assets_json" | sed 's/,$//')
+
+		cached=$(printf '{"tag":"%s","name":"%s","body":"%s","assets":[%s],"download_url":"%s"}' \
+			"$(json_escape "$tag")" "$(json_escape "$name")" "$(json_escape "$body")" "$assets_json" "$(json_escape "$download_url")")
+
+		tmp_cache="$cache.$$"
+		printf '%s' "$cached" > "$tmp_cache" 2> /dev/null && mv "$tmp_cache" "$cache" 2> /dev/null
+		rm -f "$tmp_cache"
+	fi
+
+	latest_tag=$(jsonfilter -s "$cached" -e '@.tag' 2> /dev/null)
+	if [ -z "$latest_tag" ]; then
+		rm -f "$cache"
+		update_error parse
+		return
+	fi
+	release_name=$(jsonfilter -s "$cached" -e '@.name' 2> /dev/null)
+	release_body=$(jsonfilter -s "$cached" -e '@.body' 2> /dev/null)
+	release_assets=$(jsonfilter -s "$cached" -e '@.assets' 2> /dev/null)
+	release_download=$(jsonfilter -s "$cached" -e '@.download_url' 2> /dev/null)
+	[ -n "$release_name" ] || release_name="$latest_tag"
+
+	latest_clean=$(strip_v "$latest_tag")
+	current_clean=$(strip_v "$current_ver")
+	if [ "$latest_clean" = "$current_clean" ] || [ "$latest_clean" = "${current_clean%-*}" ]; then
+		update_available="false"
+	else
+		update_available="true"
+	fi
+
+	printf '{"current_version":"%s","latest_version":"%s","release_title":"%s","release_notes":"%s","assets":%s,"download_url":"%s","update_available":%s,"pkg_manager":"%s"}\n' \
+		"$(json_escape "$current_ver")" "$(json_escape "$latest_tag")" "$(json_escape "$release_name")" "$(json_escape "$release_body")" "${release_assets:-[]}" "$(json_escape "$release_download")" "$update_available" "$pkg_mgr"
+}
+
 case "$1" in
 	list)
-		printf '{"get":{},"reset":{},"sync":{},"server_get":{},"server_set":{"url":"","token":"","router_id":"","pin":""},"server_enable":{"enabled":""},"app_enable":{"enabled":""},"plan_set":{"mac":"","name":"","limit":"","period":"","enabled":""},"plan_del":{"mac":""},"plan_reset":{"mac":""},"export":{},"import":{}}\n'
+		printf '{"get":{},"reset":{},"sync":{},"server_get":{},"server_set":{"url":"","token":"","router_id":"","pin":""},"server_enable":{"enabled":""},"app_enable":{"enabled":""},"plan_set":{"mac":"","name":"","limit":"","period":"","enabled":"","speed":""},"plan_del":{"mac":""},"plan_reset":{"mac":""},"export":{},"import":{},"check_update":{"force":false}}\n'
 		;;
 	call)
 		case "$2" in
@@ -160,6 +334,7 @@ case "$1" in
 			plan_set) plan_set ;;
 			plan_del) plan_del ;;
 			plan_reset) plan_reset ;;
+			check_update) check_update ;;
 			*) fail "unknown method" ;;
 		esac
 		;;

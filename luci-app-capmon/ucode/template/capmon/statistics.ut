@@ -35,14 +35,14 @@
 	};
 %}
 
-<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261108150000">
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261115051500">
 
 <h2 name="content">{{ entityencode(_('Data Usage Monitor')) }}</h2>
 <div class="cbi-map-descr">{{ entityencode(_('Monitor and manage the internet data usage of every client on your network.')) }}</div>
 
 {% include('capmon/root', { labels }) %}
 
-<script src="{{ resource }}/capmon/common.js?v=20261108150000"></script>
-<script src="{{ resource }}/capmon/stats.js?v=20261108150000"></script>
+<script src="{{ resource }}/capmon/common.js?v=20261115051500"></script>
+<script src="{{ resource }}/capmon/stats.js?v=20261115051500"></script>
 
 {% include('footer') %}

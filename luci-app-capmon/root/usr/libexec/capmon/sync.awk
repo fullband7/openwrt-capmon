@@ -245,6 +245,19 @@ function credit(ad, up, dn,   mac, key) {
 	}
 }
 
+function spdip(ad, m,   k) {
+	k = m SUBSEP ad
+	if (substr(ad, 1, 5) == "fe80:" || (k in sdone))
+		return
+	if (v4ok(ad))
+		s4[m] = s4[m] (s4[m] != "" ? ", " : "") ad
+	else if (isv6(ad) && v6x(ad) != "")
+		s6[m] = s6[m] (s6[m] != "" ? ", " : "") ad
+	else
+		return
+	sdone[k] = 1
+}
+
 function flow(   fam, i, e, k, v, ns, nd, nb, s1, s2, b1, b2, ca, cc, du, dd, host, inv) {
 	fam = $1
 	if (fam != "ipv4" && fam != "ipv6")
@@ -371,9 +384,18 @@ BEGIN {
 			pen[a[1]] = a[5]
 			if (a[5] == "1" && a[3] + 0 > 0)
 				qen[a[1]] = 1
+			if (n >= 6 && a[5] == "1" && a[3] + 0 > 0 && a[6] ~ /^[1-9][0-9]*$/ && length(a[6]) <= 5 && a[6] + 0 <= 10000)
+				psp[a[1]] = a[6] + 0
 		}
 	}
 	close(lf)
+	nbf = run "/block.nft"
+	while ((getline line < nbf) > 0)
+		if (match(line, /^add limit inet capmon l[ud]_[0-9a-f]+ /)) {
+			split(substr(line, 1, RLENGTH - 1), a, " ")
+			oldlim[a[5]] = 1
+		}
+	close(nbf)
 	qf = run "/quota"
 	while ((getline line < qf) > 0) {
 		n = split(line, a, "\t")
@@ -588,6 +610,30 @@ END {
 		printf "add element inet capmon blk4 { %s }\n", v4s > nftout
 	if (v6s != "")
 		printf "add element inet capmon blk6 { %s }\n", v6s > nftout
+	printf "add chain inet capmon speed { type filter hook forward priority 11; policy accept; }\nflush chain inet capmon speed\n" > nftout
+	for (nm in oldlim)
+		printf "delete limit inet capmon %s\n", nm > nftout
+	for (ad in a2m)
+		if (a2m[ad] in psp)
+			spdip(ad, a2m[ad])
+	for (ad in l2m)
+		if (!(ad in a2m) && (l2m[ad] in psp))
+			spdip(ad, l2m[ad])
+	for (m in psp) {
+		id = m
+		gsub(/:/, "", id)
+		rate = psp[m] * 125000
+		burst = psp[m] * 25000
+		if (burst < 65536)
+			burst = 65536
+		printf "add limit inet capmon lu_%s { rate over %.0f bytes/second burst %.0f bytes }\n", id, rate, burst > nftout
+		printf "add limit inet capmon ld_%s { rate over %.0f bytes/second burst %.0f bytes }\n", id, rate, burst > nftout
+		printf "add rule inet capmon speed oifname @wanif ether saddr %s limit name \"lu_%s\" drop\n", m, id > nftout
+		if (s4[m] != "")
+			printf "add rule inet capmon speed iifname @wanif ip daddr { %s } limit name \"ld_%s\" drop\n", s4[m], id > nftout
+		if (s6[m] != "")
+			printf "add rule inet capmon speed iifname @wanif ip6 daddr { %s } limit name \"ld_%s\" drop\n", s6[m], id > nftout
+	}
 	printf "%d\n", ((ctlines == 0 || ctbytes > 0) ? 1 : 0) > aout
 	close(statout)
 	close(quotaout)

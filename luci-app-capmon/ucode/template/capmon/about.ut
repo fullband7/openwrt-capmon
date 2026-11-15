@@ -1,0 +1,56 @@
+{#
+	Capmon Quota Manager
+	Copyright 2026 fullband7 (https://github.com/fullband7)
+	Licensed under the Apache License, Version 2.0
+	SPDX-License-Identifier: Apache-2.0
+#}
+
+{% include('header') %}
+
+{%
+	const labels = {
+		about_text: _('CapMon lets you see how much internet each device on your network is using, Create a data plan for a device, choose its allowance, speed limit and renewal period, and the router takes care of the rest.'),
+		check_btn: _('Check for Update'),
+		checking: _('Checking...'),
+		fetching: _('Fetching releases page from GitHub…'),
+		up_title: _('Update Available'),
+		up_sub: _('A new version is available. Use the script below to install it.'),
+		ok_title: _('App is Up to Date!'),
+		ok_sub: _('No New Version Found'),
+		installed: _('Installed'),
+		latest: _('Latest'),
+		pkg: _('pkg'),
+		version: _('Version'),
+		notes: _('Release Notes'),
+		avail_pre: _('Version'),
+		avail_post: _('is available. Use the script below to install it.'),
+		no_asset: _('No installable package was found in this release. Download it from the releases page.'),
+		ssh: _('SSH'),
+		copy: _('Copy'),
+		copied: _('Copied!'),
+		copy_failed: _('Failed!'),
+		err_title: _('Cannot reach GitHub'),
+		err_req: _('Request failed'),
+		e_unreachable: _('Cannot reach the GitHub API. Check the internet connectivity of the router.'),
+		e_parse: _('GitHub responded but the release data could not be read.'),
+		e_state: _('The temporary state directory is unavailable.'),
+		e_repo: _('The update repository is not configured correctly.'),
+		e_unknown: _('The update check failed.'),
+		powered: _('Powered By :'),
+		logo1_alt: _('Logo 1'),
+		logo2_alt: _('Logo 2'),
+		logo1_url: '',
+		logo2_url: ''
+	};
+%}
+
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261115051500">
+
+<h2 name="content">{{ entityencode(_('About')) }}</h2>
+
+{% include('capmon/root', { labels }) %}
+
+<script src="{{ resource }}/capmon/common.js?v=20261115051500"></script>
+<script src="{{ resource }}/capmon/about.js?v=20261115051500"></script>
+
+{% include('footer') %}
