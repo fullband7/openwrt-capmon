@@ -38,6 +38,7 @@ The desktop app is only a viewer with a few extras. The python server does all t
 - Automatic recovery : if the server or the network goes down, the router keeps counting and sends everything when the server is back
 - Optional pairing with a single router, so another router cannot write into your data
 - Backup and restore from the router web page (`.tar.gz`)
+- Notifications on your Android phone with the ntfy app when a client's data is running low
 - The server runs anywhere Python 3.10+ runs : Windows, Linux and macOS
 - Desktop app (optional) : a live "Synced" status and a tray notification when a plan is running low or used up.
 
@@ -181,6 +182,22 @@ Within a few seconds the **Data Sync** box on the router shows *Synced with the 
 In the desktop app, press **Reset Credentials** in App Settings and confirm. The app generates a new token and certificate. Enter the new values on the router. This also lets a different router pair with the server.
 
 With the command line server, start it once with `--reset-token` to create a new token and clear the paired router, then enter the new token on the router.
+
+## Notifications
+
+You can get a notification on your Android phone with the free [ntfy](https://ntfy.sh) app when a client is running out of data. A message is sent when the remaining data of a client's plan reaches 50%, 20% and 10%.
+
+1. In the router web page open **Services -> Quota Manager -> App Settings**.
+2. In the **Notification** box, turn it **Enabled**. A private topic name appears. Press the copy button.
+3. Install the **ntfy** app on your phone and open it.
+4. Press **+** (Subscribe to topic), paste the topic name and press **Subscribe**.
+
+To test the notifications, run this over SSH :
+
+```sh
+T=$(uci -q get capmon.ntfy.topic)
+curl -sS -d "Test from router" "https://ntfy.sh/$T"
+```
 
 ## Command line options
 
