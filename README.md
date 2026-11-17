@@ -164,7 +164,7 @@ The installer does everything for you :
 
 Within a few seconds the **Data Sync** box on the router shows *Synced with the data server*. If you use the desktop app, its badge also turns green with **Synced**, and your router appears in the Statistics and Access Control tabs.
 
-> [!WARNING]
+> [!Note]
 > **Turn off hardware flow offloading :** Hardware flow offloading sends established connections straight through the network chip, so the router's connection tracking does not see all of their packets. CapMon counts usage from connection tracking, so with offloading on the usage numbers can come out lower than the real traffic.
 >
 >
