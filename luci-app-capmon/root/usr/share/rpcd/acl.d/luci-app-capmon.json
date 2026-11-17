@@ -3,17 +3,17 @@
 		"description": "Grant access to Quota Manager",
 		"read": {
 			"ubus": {
-				"capmon": [ "get", "server_get", "export", "check_update" ],
+				"capmon": [ "get", "server_get", "check_update" ],
 				"luci-rpc": [ "getHostHints" ]
 			}
 		},
 		"write": {
 			"cgi-io": [ "upload" ],
 			"file": {
-				"/tmp/capmon-import.tar.gz": [ "write" ]
+				"/var/run/capmon/import.up": [ "write" ]
 			},
 			"ubus": {
-				"capmon": [ "reset", "sync", "server_set", "server_enable", "app_enable", "plan_set", "plan_del", "plan_reset", "import" ]
+				"capmon": [ "reset", "sync", "server_set", "server_enable", "app_enable", "ntfy_enable", "ntfy_get", "ntfy_reset", "export", "plan_set", "plan_del", "plan_reset", "import" ]
 			}
 		}
 	}

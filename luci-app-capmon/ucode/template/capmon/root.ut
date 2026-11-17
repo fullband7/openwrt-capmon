@@ -21,6 +21,7 @@
 		e_too_many: _('The maximum number of plans has been reached.'),
 		e_app_disabled: _('Quota is Disabled. Turn it on from the App Settings page first.'),
 		e_bad_backup: _('The router rejected the backup file because it is not valid.'),
+		e_token_required: _('Enter the access token again when you change the server address or the certificate pin.'),
 		e_failed: _('The operation failed.')
 	};
 %}

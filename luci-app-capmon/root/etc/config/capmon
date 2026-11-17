@@ -6,3 +6,8 @@ config capmon 'main'
 	option server_pin ''
 	option server_enabled '0'
 	option router_id ''
+
+config ntfy 'ntfy'
+	option enabled '0'
+	option server 'https://ntfy.sh'
+	option topic ''

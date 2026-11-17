@@ -189,10 +189,10 @@ function credit(ad, up, dn,   mac, key) {
 		if (!(key in smac))
 			mk(key, "-", rip)
 	} else {
-		if (ad in a2m)
-			mac = a2m[ad]
-		else if (ad in l2m)
+		if (ad in l2m)
 			mac = l2m[ad]
+		else if (ad in a2m)
+			mac = a2m[ad]
 		else if (index(ad, ":") > 0 && (v6x(ad) in x2m))
 			mac = x2m[v6x(ad)]
 		if (mac != "") {
@@ -243,6 +243,10 @@ function credit(ad, up, dn,   mac, key) {
 		if ((mac in blk0) && up + dn > 0)
 			leak[ad] = 1
 	}
+}
+
+function ipm(ad) {
+	return (ad in l2m) ? l2m[ad] : a2m[ad]
 }
 
 function spdip(ad, m,   k) {
@@ -593,7 +597,7 @@ END {
 		print "mac\t" m > bout
 	}
 	for (ad in a2m)
-		if (a2m[ad] in blk)
+		if (ipm(ad) in blk)
 			addip(ad)
 	for (ad in l2m)
 		if (!(ad in a2m) && (l2m[ad] in blk))
@@ -611,11 +615,18 @@ END {
 	if (v6s != "")
 		printf "add element inet capmon blk6 { %s }\n", v6s > nftout
 	printf "add chain inet capmon speed { type filter hook forward priority 11; policy accept; }\nflush chain inet capmon speed\n" > nftout
+	printf "add chain inet capmon guard { type filter hook forward priority 9; policy accept; }\nflush chain inet capmon guard\n" > nftout
+	if (antispoof == 1)
+		for (ad in l2m)
+			if ((l2m[ad] in qen) && v4ok(ad))
+				gip[l2m[ad]] = gip[l2m[ad]] (gip[l2m[ad]] != "" ? ", " : "") ad
+	for (m in gip)
+		printf "add rule inet capmon guard ip saddr { %s } ether saddr != %s drop\n", gip[m], m > nftout
 	for (nm in oldlim)
 		printf "delete limit inet capmon %s\n", nm > nftout
 	for (ad in a2m)
-		if (a2m[ad] in psp)
-			spdip(ad, a2m[ad])
+		if (ipm(ad) in psp)
+			spdip(ad, ipm(ad))
 	for (ad in l2m)
 		if (!(ad in a2m) && (l2m[ad] in psp))
 			spdip(ad, l2m[ad])

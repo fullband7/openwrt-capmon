@@ -34,6 +34,14 @@
 		srv_token_keep: _('Leave empty to keep the current token'),
 		srv_id: _('Router Name (Optional)'),
 		srv_pin: _('Certificate Pin'),
+		ntfy_title: _('Notification'),
+		ntfy_help: _('Sends a notification to the ntfy app when the remaining data of a data plan reaches 50%, 20% and 10%. Turn it on to get a private topic name.'),
+		ntfy_topic: _('Topic Subscription'),
+		ntfy_copy: _('Copy'),
+		ntfy_copied: _('Copied'),
+		ntfy_reset: _('Reset Topic'),
+		ntfy_reset_title: _('Reset the topic?'),
+		ntfy_reset_text: _('A new random topic name will be created and the old one stops working'),
 		err_url: _('Enter an address like https://192.168.1.50:8765'),
 		err_token: _('The access token must be 16 to 128 letters, digits, dots, dashes or underscores.'),
 		err_id: _('The router name may only contain letters, digits, dashes and underscores.'),
@@ -72,14 +80,15 @@
 	};
 %}
 
-<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261115051500">
+<link rel="stylesheet" href="{{ resource }}/capmon/style.css?v=20261117034500">
 
 <h2 name="content">{{ entityencode(_('App Settings')) }}</h2>
 
 {% include('capmon/root', { labels }) %}
 
 <script src="{{ resource }}/capmon/common.js?v=20261115051500"></script>
-<script src="{{ resource }}/capmon/backup.js?v=20261115051500"></script>
-<script src="{{ resource }}/capmon/settings.js?v=20261115051500"></script>
+<script src="{{ resource }}/capmon/backup.js?v=20261117050000"></script>
+<script src="{{ resource }}/capmon/ntfy.js?v=20261117034500"></script>
+<script src="{{ resource }}/capmon/settings.js?v=20261117034500"></script>
 
 {% include('footer') %}

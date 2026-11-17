@@ -26,6 +26,7 @@ map_rc() {
 		13) fail tls ;;
 		14) fail insecure ;;
 		15) fail bad_backup ;;
+		16) fail token_required ;;
 		*) fail failed ;;
 	esac
 }
@@ -122,11 +123,26 @@ app_enable() {
 	map_rc "$?"
 }
 
+ntfy_enable() {
+	local enabled
+	read_input
+	json_get_var enabled enabled
+	case "$enabled" in
+		0|1) ;;
+		*) fail "invalid input" ;;
+	esac
+	/usr/sbin/capmon ntfy-enable "$enabled" > /dev/null 2>&1 < /dev/null
+	map_rc "$?"
+}
+
 UPDATE_REPO="fullband7/openwrt-capmon"
 UPDATE_PKG="luci-app-capmon"
 UPDATE_MAX_BYTES=120000
 UPDATE_FIELD_MAX=128
 UPDATE_BODY_MAX=10000
+UPDATE_CACHE=/var/run/capmon/update.cache
+UPDATE_TTL=600
+UPDATE_FAIL_TTL=30
 
 json_escape() {
 	printf '%s' "$1" \
@@ -181,6 +197,30 @@ fetch_release() {
 		--url "https://api.github.com/repos/$UPDATE_REPO/releases/latest" 2> /dev/null | head -c "$UPDATE_MAX_BYTES"
 }
 
+fetch_release_cached() {
+	local ts=0 now age body
+	now=$(date +%s)
+	if [ -r "$UPDATE_CACHE" ]; then
+		read -r ts < "$UPDATE_CACHE"
+		case "$ts" in
+			""|*[!0-9]*) ts=0 ;;
+		esac
+		age=$((now - ts))
+		body=$(tail -n +2 "$UPDATE_CACHE" | head -c "$UPDATE_MAX_BYTES")
+		if [ "$age" -ge 0 ]; then
+			if [ -n "$body" ] && [ "$age" -lt "$UPDATE_TTL" ]; then
+				printf '%s' "$body"
+				return 0
+			fi
+			[ -z "$body" ] && [ "$age" -lt "$UPDATE_FAIL_TTL" ] && return 0
+		fi
+	fi
+	body=$(fetch_release)
+	[ -d /var/run/capmon ] || { mkdir -p /var/run/capmon && chmod 700 /var/run/capmon; }
+	{ printf '%s\n' "$now"; printf '%s' "$body"; } > "$UPDATE_CACHE.new" && mv "$UPDATE_CACHE.new" "$UPDATE_CACHE"
+	printf '%s' "$body"
+}
+
 update_error() {
 	printf '{"error":"%s","update_available":false,"current_version":"%s","pkg_manager":"%s"}\n' \
 		"$1" "$(json_escape "$current_ver")" "$pkg_mgr"
@@ -200,10 +240,13 @@ check_update() {
 
 	valid_repo "$UPDATE_REPO" || { update_error repo; return; }
 
-	raw=$(fetch_release)
+	raw=$(fetch_release_cached)
 	[ -n "$raw" ] || { update_error unreachable; return; }
 	tag=$(jsonfilter -s "$raw" -e '@.tag_name' 2> /dev/null | head -c "$UPDATE_FIELD_MAX")
 	[ -n "$tag" ] || { update_error parse; return; }
+	case "$tag" in
+		*[!A-Za-z0-9._+-]*) update_error parse; return ;;
+	esac
 	name=$(jsonfilter -s "$raw" -e '@.name' 2> /dev/null | head -c "$UPDATE_FIELD_MAX")
 	body=$(jsonfilter -s "$raw" -e '@.body' 2> /dev/null | head -c "$UPDATE_BODY_MAX")
 	raw_assets=$(jsonfilter -s "$raw" -e '@.assets[*].browser_download_url' 2> /dev/null)
@@ -244,7 +287,7 @@ EOF
 
 case "$1" in
 	list)
-		printf '{"get":{},"reset":{},"sync":{},"server_get":{},"server_set":{"url":"","token":"","router_id":"","pin":""},"server_enable":{"enabled":""},"app_enable":{"enabled":""},"plan_set":{"mac":"","name":"","limit":"","period":"","enabled":"","speed":""},"plan_del":{"mac":""},"plan_reset":{"mac":""},"export":{},"import":{},"check_update":{}}\n'
+		printf '{"get":{},"reset":{},"sync":{},"server_get":{},"server_set":{"url":"","token":"","router_id":"","pin":""},"server_enable":{"enabled":""},"app_enable":{"enabled":""},"ntfy_get":{},"ntfy_enable":{"enabled":""},"ntfy_reset":{},"plan_set":{"mac":"","name":"","limit":"","period":"","enabled":"","speed":""},"plan_del":{"mac":""},"plan_reset":{"mac":""},"export":{},"import":{},"check_update":{}}\n'
 		;;
 	call)
 		case "$2" in
@@ -275,9 +318,19 @@ case "$1" in
 				/usr/sbin/capmon import > /dev/null 2>&1 < /dev/null
 				map_rc "$?"
 				;;
+			ntfy_get)
+				cat > /dev/null
+				exec /usr/sbin/capmon ntfy-get
+				;;
 			server_set) server_set ;;
 			server_enable) server_enable ;;
 			app_enable) app_enable ;;
+			ntfy_enable) ntfy_enable ;;
+			ntfy_reset)
+				cat > /dev/null
+				/usr/sbin/capmon ntfy-reset > /dev/null 2>&1 < /dev/null
+				map_rc "$?"
+				;;
 			plan_set) plan_set ;;
 			plan_del) plan_del ;;
 			plan_reset) plan_reset ;;

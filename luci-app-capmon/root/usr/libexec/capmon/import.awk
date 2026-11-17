@@ -108,7 +108,7 @@ END {
 	print "set capmon.main.server_url='" cfg["server_url"] "'" > co
 	print "set capmon.main.server_pin='" cfg["server_pin"] "'" > co
 	print "set capmon.main.router_id='" cfg["router_id"] "'" > co
-	chg = (cfg["server_url"] != ocurl || cfg["router_id"] != ocid)
+	chg = (cfg["server_url"] != ocurl || cfg["router_id"] != ocid || cfg["server_pin"] != ocpin)
 	en = (chg || cfg["server_url"] == "") ? "0" : cfg["server_enabled"]
 	print "set capmon.main.server_enabled='" en "'" > co
 	if (cfg["extra_dev"] != "")

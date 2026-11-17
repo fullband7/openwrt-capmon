@@ -3,6 +3,13 @@ function clean(s) {
 	return s
 }
 
+function nm(s) {
+	s = clean(s)
+	if (s != "-")
+		sub(/^-+/, "", s)
+	return s
+}
+
 function emit(type, key, name, ip, up, dn, tup, tdn, seen, limit, period, enabled, used, pkey, since, day, yup, ydn, mup, mdn, lup, ldn, wup, wdn, pup, pdn) {
 	printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", type, key, name, ip, up, dn, tup, tdn, seen, limit, period, enabled, used, pkey, since, day, yup, ydn, mup, mdn, lup, ldn, wup, wdn, pup, pdn
 }
@@ -29,7 +36,7 @@ FILENAME == pf {
 	if (NF >= 5) {
 		np++
 		pmac[np] = clean($1)
-		pname[np] = clean($2)
+		pname[np] = nm($2)
 		plim[np] = $3 + 0
 		pper[np] = clean($4)
 		pen[np] = ($5 == "1") ? 1 : 0
@@ -40,7 +47,7 @@ FILENAME == pf {
 NF >= 9 {
 	nc++
 	ckey[nc] = clean($1)
-	cname[nc] = clean($4)
+	cname[nc] = nm($4)
 	ip = clean($3)
 	cip[nc] = (ip == "") ? "-" : ip
 	cup[nc] = $5

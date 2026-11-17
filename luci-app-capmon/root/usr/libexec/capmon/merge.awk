@@ -131,10 +131,12 @@ $1 == "meta" {
 
 $1 == "client" {
 	k = $2
-	if (!(ismac(k) || k == "router" || k ~ /^[0-9a-f:.]+$/))
+	if (length(k) > 45 || ncli >= 4096 || !(ismac(k) || k == "router" || k ~ /^[0-9a-f:.]+$/))
 		next
-	if (!isname($3) || !isctr($5) || !isctr($6) || !isctr($7) || !isctr($8) || !isctr($9) || !isopt($17) || !isopt($18) || !isopt($19) || !isopt($20) || !isopt($21) || !isopt($22) || !isopt($23) || !isopt($24) || !isopt($25) || !isopt($26))
+	if (($3 != "" && !bname($3)) || ($4 != "" && !bip($4)) || !isctr($5) || !isctr($6) || !isctr($7) || !isctr($8) || !isctr($9) || !isopt($17) || !isopt($18) || !isopt($19) || !isopt($20) || !isopt($21) || !isopt($22) || !isopt($23) || !isopt($24) || !isopt($25) || !isopt($26))
 		next
+	if (!(k in cn))
+		ncli++
 	cn[k] = ($3 == "") ? "-" : $3
 	ci[k] = ($4 == "") ? "-" : $4
 	cu[k] = $5 + 0
@@ -157,7 +159,7 @@ $1 == "client" {
 
 $1 == "plan" {
 	m = $2
-	if (!ismac(m) || !isname($3) || !isctr($10) || !isctr($13))
+	if (!ismac(m) || !isname($3) || length($3) > 32 || !isctr($10) || !isctr($13))
 		next
 	if ($11 != "none" && $11 != "daily" && $11 != "weekly" && $11 != "monthly")
 		next
