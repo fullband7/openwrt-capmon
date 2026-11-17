@@ -88,7 +88,7 @@
 
 <script src="{{ resource }}/capmon/common.js?v=20261115051500"></script>
 <script src="{{ resource }}/capmon/backup.js?v=20261117050000"></script>
-<script src="{{ resource }}/capmon/ntfy.js?v=20261117034500"></script>
+<script src="{{ resource }}/capmon/ntfy.js?v=20261117195500"></script>
 <script src="{{ resource }}/capmon/settings.js?v=20261117034500"></script>
 
 {% include('footer') %}
